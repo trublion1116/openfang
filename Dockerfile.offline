@@ -1,0 +1,66 @@
+# ── Stage 1: Build ──────────────────────────────────────────────
+FROM rust:1-slim-bookworm AS builder
+
+WORKDIR /build
+
+RUN apt-get update && apt-get install -y \
+    pkg-config libssl-dev perl make \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+COPY xtask ./xtask
+COPY agents ./agents
+COPY packages ./packages
+
+# Release build with reasonable LTO for smaller binary
+ARG LTO=true
+ARG CODEGEN_UNITS=1
+ENV CARGO_PROFILE_RELEASE_LTO=${LTO} \
+    CARGO_PROFILE_RELEASE_CODEGEN_UNITS=${CODEGEN_UNITS}
+
+RUN cargo build --release --bin openfang
+
+# ── Stage 2: Minimal Runtime ───────────────────────────────────
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Binary
+COPY --from=builder /build/target/release/openfang /usr/local/bin/openfang
+
+# Agent templates
+COPY --from=builder /build/agents /opt/openfang/agents
+
+# Default config (GLM via OpenAI-compatible API)
+COPY <<EOF /etc/openfang/config.toml
+[default_model]
+provider = "openai"
+model = "glm-5.1"
+api_key_env = "OPENAI_API_KEY"
+base_url = "https://open.bigmodel.cn/api/paas/v4"
+
+[memory]
+decay_rate = 0.05
+
+# [agent] — Agent execution settings
+# tool_timeout_secs: per-tool execution timeout (default: 120)
+# agent_tool_timeout_secs: inter-agent call timeout (default: 600)
+
+# [a2a] — A2A (Agent-to-Agent) protocol
+# timeout_secs: request timeout in seconds (default: 30)
+# enabled = false
+# timeout_secs = 30
+EOF
+
+EXPOSE 4200
+VOLUME /data
+
+ENV OPENFANG_HOME=/data \
+    OPENFANG_LISTEN=0.0.0.0:4200
+
+ENTRYPOINT ["openfang"]
+CMD ["start"]

@@ -6691,7 +6691,14 @@ pub async fn a2a_discover_external(
         }
     };
 
-    let client = openfang_runtime::a2a::A2aClient::new();
+    let timeout = state
+        .kernel
+        .config
+        .a2a
+        .as_ref()
+        .map(|c| c.timeout())
+        .unwrap_or_else(|| std::time::Duration::from_secs(30));
+    let client = openfang_runtime::a2a::A2aClient::new(timeout);
     match client.discover(&url).await {
         Ok(card) => {
             let card_json = serde_json::to_value(&card).unwrap_or_default();
@@ -6726,7 +6733,7 @@ pub async fn a2a_discover_external(
 
 /// POST /api/a2a/send — Send a task to an external A2A agent.
 pub async fn a2a_send_external(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
     Json(body): Json<serde_json::Value>,
 ) -> impl IntoResponse {
     let url = match body["url"].as_str() {
@@ -6749,7 +6756,14 @@ pub async fn a2a_send_external(
     };
     let session_id = body["session_id"].as_str();
 
-    let client = openfang_runtime::a2a::A2aClient::new();
+    let timeout = state
+        .kernel
+        .config
+        .a2a
+        .as_ref()
+        .map(|c| c.timeout())
+        .unwrap_or_else(|| std::time::Duration::from_secs(30));
+    let client = openfang_runtime::a2a::A2aClient::new(timeout);
     match client.send_task(&url, &message, session_id).await {
         Ok(task) => (
             StatusCode::OK,
@@ -6764,7 +6778,7 @@ pub async fn a2a_send_external(
 
 /// GET /api/a2a/tasks/{id}/status — Get task status from an external A2A agent.
 pub async fn a2a_external_task_status(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
     Path(task_id): Path<String>,
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
@@ -6778,7 +6792,14 @@ pub async fn a2a_external_task_status(
         }
     };
 
-    let client = openfang_runtime::a2a::A2aClient::new();
+    let timeout = state
+        .kernel
+        .config
+        .a2a
+        .as_ref()
+        .map(|c| c.timeout())
+        .unwrap_or_else(|| std::time::Duration::from_secs(30));
+    let client = openfang_runtime::a2a::A2aClient::new(timeout);
     match client.get_task(&url, &task_id).await {
         Ok(task) => (
             StatusCode::OK,

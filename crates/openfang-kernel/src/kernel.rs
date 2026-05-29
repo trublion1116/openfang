@@ -2201,6 +2201,8 @@ impl OpenFangKernel {
                 ctx_window,
                 Some(&kernel_clone.process_manager),
                 content_blocks,
+                kernel_clone.config.agent.tool_timeout_secs,
+                kernel_clone.config.agent.agent_tool_timeout_secs,
             )
             .await;
 
@@ -2777,6 +2779,8 @@ impl OpenFangKernel {
             ctx_window,
             Some(&self.process_manager),
             content_blocks,
+            self.config.agent.tool_timeout_secs,
+            self.config.agent.agent_tool_timeout_secs,
         )
         .await
         .map_err(KernelError::OpenFang)?;
@@ -4463,8 +4467,9 @@ impl OpenFangKernel {
             if a2a_config.enabled && !a2a_config.external_agents.is_empty() {
                 let kernel = Arc::clone(self);
                 let agents = a2a_config.external_agents.clone();
+                let timeout = a2a_config.timeout();
                 tokio::spawn(async move {
-                    let discovered = openfang_runtime::a2a::discover_external_agents(&agents).await;
+                    let discovered = openfang_runtime::a2a::discover_external_agents(&agents, timeout).await;
                     if let Ok(mut store) = kernel.a2a_external_agents.lock() {
                         *store = discovered;
                     }
@@ -7131,6 +7136,14 @@ impl KernelHandle for OpenFangKernel {
             .iter()
             .find(|(_, card)| card.name.to_lowercase() == name_lower)
             .map(|(_, card)| card.url.clone())
+    }
+
+    fn a2a_timeout(&self) -> std::time::Duration {
+        self.config
+            .a2a
+            .as_ref()
+            .map(|c| c.timeout())
+            .unwrap_or_else(|| std::time::Duration::from_secs(30))
     }
 
     async fn get_channel_default_recipient(&self, channel: &str) -> Option<String> {

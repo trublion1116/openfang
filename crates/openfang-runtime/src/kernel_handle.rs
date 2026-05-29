@@ -123,6 +123,11 @@ pub trait KernelHandle: Send + Sync {
         false
     }
 
+    /// Return the A2A request timeout from the kernel configuration.
+    fn a2a_timeout(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(30)
+    }
+
     /// Request approval for a tool execution. Blocks until approved/denied/timed out.
     /// Returns `Ok(true)` if approved, `Ok(false)` if denied or timed out.
     async fn request_approval(

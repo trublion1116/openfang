@@ -40,21 +40,20 @@ const MAX_RETRIES: u32 = 3;
 /// Base delay for exponential backoff (milliseconds).
 const BASE_RETRY_DELAY_MS: u64 = 1000;
 
-/// Timeout for individual tool executions (seconds).
-/// Raised from 60s to 120s for browser automation and long-running builds.
-const TOOL_TIMEOUT_SECS: u64 = 120;
+/// Default per-tool execution timeout (seconds).
+#[cfg(test)]
+const DEFAULT_TOOL_TIMEOUT_SECS: u64 = 120;
 
-/// Timeout for inter-agent tool calls (seconds).
-/// Agent delegation (agent_send, agent_spawn) can involve a full agent loop on the
-/// target, so these need a significantly longer timeout than regular tools.
-const AGENT_TOOL_TIMEOUT_SECS: u64 = 600;
+/// Default inter-agent tool call timeout (seconds).
+#[cfg(test)]
+const DEFAULT_AGENT_TOOL_TIMEOUT_SECS: u64 = 600;
 
 /// Returns the appropriate timeout duration for a given tool name.
 /// Inter-agent calls get a longer timeout since they may trigger full agent loops.
-fn tool_timeout_for(tool_name: &str) -> Duration {
+fn tool_timeout_for(tool_name: &str, tool_timeout_secs: u64, agent_tool_timeout_secs: u64) -> Duration {
     match tool_name {
-        "agent_send" | "agent_spawn" => Duration::from_secs(AGENT_TOOL_TIMEOUT_SECS),
-        _ => Duration::from_secs(TOOL_TIMEOUT_SECS),
+        "agent_send" | "agent_spawn" => Duration::from_secs(agent_tool_timeout_secs),
+        _ => Duration::from_secs(tool_timeout_secs),
     }
 }
 
@@ -280,6 +279,8 @@ pub async fn run_agent_loop(
     context_window_tokens: Option<usize>,
     process_manager: Option<&crate::process_manager::ProcessManager>,
     user_content_blocks: Option<Vec<ContentBlock>>,
+    tool_timeout_secs: u64,
+    agent_tool_timeout_secs: u64,
 ) -> OpenFangResult<AgentLoopResult> {
     info!(agent = %manifest.name, "Starting agent loop");
 
@@ -887,7 +888,7 @@ pub async fn run_agent_loop(
                     let effective_exec_policy = manifest.exec_policy.as_ref();
 
                     // Timeout-wrapped execution
-                    let timeout = tool_timeout_for(&tool_call.name);
+                    let timeout = tool_timeout_for(&tool_call.name, tool_timeout_secs, agent_tool_timeout_secs);
                     let timeout_secs = timeout.as_secs();
                     let result = match tokio::time::timeout(
                         timeout,
@@ -1490,6 +1491,8 @@ pub async fn run_agent_loop_streaming(
     context_window_tokens: Option<usize>,
     process_manager: Option<&crate::process_manager::ProcessManager>,
     user_content_blocks: Option<Vec<ContentBlock>>,
+    tool_timeout_secs: u64,
+    agent_tool_timeout_secs: u64,
 ) -> OpenFangResult<AgentLoopResult> {
     info!(agent = %manifest.name, "Starting streaming agent loop");
 
@@ -2078,7 +2081,7 @@ pub async fn run_agent_loop_streaming(
                     let effective_exec_policy = manifest.exec_policy.as_ref();
 
                     // Timeout-wrapped execution
-                    let timeout = tool_timeout_for(&tool_call.name);
+                    let timeout = tool_timeout_for(&tool_call.name, tool_timeout_secs, agent_tool_timeout_secs);
                     let timeout_secs = timeout.as_secs();
                     let result = match tokio::time::timeout(
                         timeout,
@@ -3305,17 +3308,20 @@ mod tests {
     }
 
     #[test]
-    fn test_tool_timeout_constant() {
-        assert_eq!(TOOL_TIMEOUT_SECS, 120);
-        assert_eq!(AGENT_TOOL_TIMEOUT_SECS, 600);
+    fn test_tool_timeout_defaults() {
+        assert_eq!(DEFAULT_TOOL_TIMEOUT_SECS, 120);
+        assert_eq!(DEFAULT_AGENT_TOOL_TIMEOUT_SECS, 600);
     }
 
     #[test]
     fn test_tool_timeout_for_agent_tools() {
-        assert_eq!(tool_timeout_for("agent_send"), Duration::from_secs(600));
-        assert_eq!(tool_timeout_for("agent_spawn"), Duration::from_secs(600));
-        assert_eq!(tool_timeout_for("file_read"), Duration::from_secs(120));
-        assert_eq!(tool_timeout_for("shell_exec"), Duration::from_secs(120));
+        assert_eq!(tool_timeout_for("agent_send", 120, 600), Duration::from_secs(600));
+        assert_eq!(tool_timeout_for("agent_spawn", 120, 600), Duration::from_secs(600));
+        assert_eq!(tool_timeout_for("file_read", 120, 600), Duration::from_secs(120));
+        assert_eq!(tool_timeout_for("shell_exec", 120, 600), Duration::from_secs(120));
+        // Verify custom values work
+        assert_eq!(tool_timeout_for("agent_send", 300, 900), Duration::from_secs(900));
+        assert_eq!(tool_timeout_for("file_read", 300, 900), Duration::from_secs(300));
     }
 
     #[test]
@@ -3546,6 +3552,8 @@ mod tests {
             None, // context_window_tokens
             None, // process_manager
             None, // user_content_blocks
+            120,
+            600,
         )
         .await
         .expect("Loop should complete without error");
@@ -3599,6 +3607,8 @@ mod tests {
             None, // context_window_tokens
             None, // process_manager
             None, // user_content_blocks
+            120,
+            600,
         )
         .await
         .expect("Loop should complete without error");
@@ -3654,6 +3664,8 @@ mod tests {
             None, // context_window_tokens
             None, // process_manager
             None, // user_content_blocks
+            120,
+            600,
         )
         .await
         .expect("Loop should complete without error");
@@ -3707,6 +3719,8 @@ mod tests {
             None, // context_window_tokens
             None, // process_manager
             None, // user_content_blocks
+            120,
+            600,
         )
         .await
         .expect("Loop should complete without error");
@@ -3753,6 +3767,8 @@ mod tests {
             None, // context_window_tokens
             None, // process_manager
             None, // user_content_blocks
+            120,
+            600,
         )
         .await
         .expect("Streaming loop should complete without error");
@@ -3877,6 +3893,8 @@ mod tests {
             None, // context_window_tokens
             None, // process_manager
             None, // user_content_blocks
+            120,
+            600,
         )
         .await
         .expect("Loop should recover via retry");
@@ -3924,6 +3942,8 @@ mod tests {
             None, // context_window_tokens
             None, // process_manager
             None, // user_content_blocks
+            120,
+            600,
         )
         .await
         .expect("Loop should complete with fallback");
@@ -3979,6 +3999,8 @@ mod tests {
             None, // context_window_tokens
             None, // process_manager
             None, // user_content_blocks
+            120,
+            600,
         )
         .await
         .expect("Streaming loop should complete without error");
@@ -4955,6 +4977,8 @@ mod tests {
             None, // context_window_tokens
             None, // process_manager
             None, // user_content_blocks
+            120,
+            600,
         )
         .await
         .expect("Agent loop should complete");
@@ -5025,6 +5049,8 @@ mod tests {
             None,
             None,
             None,
+            120,
+            600,
         )
         .await
         .expect("Agent loop should recover nested XML tool calls");
@@ -5097,6 +5123,8 @@ mod tests {
             None,
             None,
             None, // user_content_blocks
+            120,
+            600,
         )
         .await
         .expect("Normal loop should complete");
@@ -5160,6 +5188,8 @@ mod tests {
             None, // context_window_tokens
             None, // process_manager
             None, // user_content_blocks
+            120,
+            600,
         )
         .await
         .expect("Streaming loop should complete");

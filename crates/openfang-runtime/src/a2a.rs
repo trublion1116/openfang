@@ -320,8 +320,9 @@ impl Default for A2aTaskStore {
 /// Called during kernel boot to populate the list of known external agents.
 pub async fn discover_external_agents(
     agents: &[openfang_types::config::ExternalAgent],
+    timeout: std::time::Duration,
 ) -> Vec<(String, AgentCard)> {
-    let client = A2aClient::new();
+    let client = A2aClient::new(timeout);
     let mut discovered = Vec::new();
 
     for agent in agents {
@@ -399,11 +400,11 @@ pub struct A2aClient {
 }
 
 impl A2aClient {
-    /// Create a new A2A client.
-    pub fn new() -> Self {
+    /// Create a new A2A client with the given request timeout.
+    pub fn new(timeout: std::time::Duration) -> Self {
         Self {
             client: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(30))
+                .timeout(timeout)
                 .build()
                 .unwrap_or_default(),
         }
@@ -513,7 +514,7 @@ impl A2aClient {
 
 impl Default for A2aClient {
     fn default() -> Self {
-        Self::new()
+        Self::new(std::time::Duration::from_secs(30))
     }
 }
 
@@ -742,6 +743,7 @@ mod tests {
                 name: "other-agent".to_string(),
                 url: "https://other.example.com".to_string(),
             }],
+            timeout_secs: None,
         };
 
         let json = serde_json::to_string(&config).unwrap();

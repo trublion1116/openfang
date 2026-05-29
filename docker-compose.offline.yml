@@ -1,0 +1,16 @@
+services:
+  openfang:
+    build:
+      context: .
+      dockerfile: Dockerfile.offline
+    image: openfang:0.6.4-offline
+    ports:
+      - "4200:4200"
+    volumes:
+      - openfang-data:/data
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:?请设置 OPENAI_API_KEY 环境变量}
+    restart: unless-stopped
+
+volumes:
+  openfang-data:

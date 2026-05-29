@@ -91,6 +91,34 @@ pub enum OutputFormat {
     PlainText,
 }
 
+/// Agent execution configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AgentConfig {
+    /// Default timeout for individual tool executions (seconds). Default: 120.
+    pub tool_timeout_secs: u64,
+    /// Timeout for inter-agent tool calls like agent_send/spawn (seconds). Default: 600.
+    pub agent_tool_timeout_secs: u64,
+}
+
+impl Default for AgentConfig {
+    fn default() -> Self {
+        Self {
+            tool_timeout_secs: 120,
+            agent_tool_timeout_secs: 600,
+        }
+    }
+}
+
+impl AgentConfig {
+    pub fn tool_timeout(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.tool_timeout_secs)
+    }
+    pub fn agent_tool_timeout(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.agent_tool_timeout_secs)
+    }
+}
+
 /// Per-channel behavior overrides.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -1208,6 +1236,9 @@ pub struct KernelConfig {
     /// ```
     #[serde(default)]
     pub skills: HashMap<String, HashMap<String, String>>,
+    /// Agent execution configuration (tool timeouts, etc.).
+    #[serde(default)]
+    pub agent: AgentConfig,
 }
 
 /// Heartbeat monitor settings exposed in `[heartbeat]` config section.
@@ -1368,6 +1399,16 @@ pub struct A2aConfig {
     /// External A2A agents to connect to.
     #[serde(default)]
     pub external_agents: Vec<ExternalAgent>,
+    /// A2A request timeout in seconds. Defaults to 30 when not set.
+    #[serde(default)]
+    pub timeout_secs: Option<u64>,
+}
+
+impl A2aConfig {
+    /// Return the configured timeout, or 30 seconds if not set.
+    pub fn timeout(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.timeout_secs.unwrap_or(30))
+    }
 }
 
 fn default_a2a_path() -> String {
@@ -1446,6 +1487,7 @@ impl Default for KernelConfig {
             workflows_dir: None,
             heartbeat: HeartbeatSettings::default(),
             skills: HashMap::new(),
+            agent: AgentConfig::default(),
         }
     }
 }
