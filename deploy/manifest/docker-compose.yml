@@ -31,14 +31,11 @@ services:
       - ./hands:/opt/openfang/hands:ro
       # config.toml（MCP S3 连接配置、LLM 配置等）
       - ./config.toml:/etc/openfang/config.toml:ro
+      # 共享上传目录：OpenFang 保存文件 → MCP 读取文件上传到 S3
+      - openfang-uploads:/tmp/openfang_uploads
     environment:
       # LLM API Key（必填）
       - OPENAI_API_KEY=${OPENAI_API_KEY:?请在 .env 中设置 OPENAI_API_KEY}
-      # MCP OBS S3 环境变量（Hand agent 调用 MCP 时需要）
-      - OBS_ACCESS_KEY_ID=${OBS_ACCESS_KEY_ID:-}
-      - OBS_SECRET_ACCESS_KEY=${OBS_SECRET_ACCESS_KEY:-}
-      - OBS_ENDPOINT=${OBS_ENDPOINT:-}
-      - OBS_BUCKET=${OBS_BUCKET:-}
     depends_on:
       mcp-obs-s3:
         condition: service_started
@@ -54,6 +51,9 @@ services:
   mcp-obs-s3:
     image: mcp-obs-s3:1.1.0
     container_name: mcp-obs-s3
+    volumes:
+      # 挂载共享上传目录（只读），MCP s3_upload 读取文件从这里取
+      - openfang-uploads:/tmp/openfang_uploads:ro
     environment:
       - MCP_TRANSPORT=http
       - MCP_PORT=3100
@@ -71,3 +71,5 @@ services:
 
 volumes:
   openfang-data:
+  # 共享上传目录：OpenFang 写入，MCP 读取
+  openfang-uploads:
