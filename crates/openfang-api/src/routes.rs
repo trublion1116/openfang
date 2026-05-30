@@ -291,6 +291,63 @@ pub fn resolve_attachments(
     blocks
 }
 
+/// Resolve attachments for a Hand agent — injects file metadata as text blocks
+/// instead of base64-encoded image blocks. This allows the agent to access
+/// file paths and upload them via MCP tools without multimodal processing.
+pub fn resolve_hand_attachments(
+    attachments: &[AttachmentRef],
+) -> Vec<openfang_types::message::ContentBlock> {
+    let upload_dir = std::env::temp_dir().join("openfang_uploads");
+    let mut blocks = Vec::new();
+
+    for att in attachments {
+        let meta = UPLOAD_REGISTRY.get(&att.file_id);
+        let content_type = if let Some(ref m) = meta {
+            m.content_type.clone()
+        } else if !att.content_type.is_empty() {
+            att.content_type.clone()
+        } else {
+            continue;
+        };
+
+        // Validate file_id is a UUID to prevent path traversal
+        if uuid::Uuid::parse_str(&att.file_id).is_err() {
+            continue;
+        }
+
+        let file_path = upload_dir.join(&att.file_id);
+        let filename = meta
+            .as_ref()
+            .map(|m| m.filename.clone())
+            .unwrap_or_else(|| att.filename.clone());
+
+        let size = std::fs::metadata(&file_path).map(|m| m.len()).unwrap_or(0);
+
+        let size_human = if size > 1024 * 1024 {
+            format!("{:.1}MB", size as f64 / (1024.0 * 1024.0))
+        } else if size > 1024 {
+            format!("{:.1}KB", size as f64 / 1024.0)
+        } else {
+            format!("{}B", size)
+        };
+
+        let file_info = format!(
+            "[FILE_ATTACHMENT] filename=\"{}\" content_type=\"{}\" size=\"{}\" path=\"{}\"",
+            filename,
+            content_type,
+            size_human,
+            file_path.display()
+        );
+
+        blocks.push(openfang_types::message::ContentBlock::Text {
+            text: file_info,
+            provider_metadata: None,
+        });
+    }
+
+    blocks
+}
+
 /// Pre-insert image attachments into an agent's session so the LLM can see them.
 ///
 /// This injects image content blocks into the session BEFORE the kernel
@@ -361,15 +418,25 @@ pub async fn send_message(
         );
     }
 
-    // Resolve file attachments into image content blocks.
-    // Pass them as content_blocks so the LLM receives them in the current turn
-    // (not as a separate session message which the LLM may not process).
+    // Resolve file attachments into content blocks.
+    // For Hand agents: inject file metadata as text (non-multimodal pipeline).
+    // For regular agents: use existing base64 image block resolution.
     let content_blocks = if !req.attachments.is_empty() {
-        let image_blocks = resolve_attachments(&req.attachments);
-        if image_blocks.is_empty() {
-            None
+        let is_hand = state.kernel.hand_registry.find_by_agent(agent_id).is_some();
+        if is_hand {
+            let file_blocks = resolve_hand_attachments(&req.attachments);
+            if file_blocks.is_empty() {
+                None
+            } else {
+                Some(file_blocks)
+            }
         } else {
-            Some(image_blocks)
+            let image_blocks = resolve_attachments(&req.attachments);
+            if image_blocks.is_empty() {
+                None
+            } else {
+                Some(image_blocks)
+            }
         }
     } else {
         None
@@ -10125,12 +10192,35 @@ static UPLOAD_REGISTRY: LazyLock<DashMap<String, UploadMeta>> = LazyLock::new(Da
 const MAX_UPLOAD_SIZE: usize = 10 * 1024 * 1024;
 
 /// Allowed content type prefixes for upload.
-const ALLOWED_CONTENT_TYPES: &[&str] = &["image/", "text/", "application/pdf", "audio/"];
+const ALLOWED_CONTENT_TYPES: &[&str] = &[
+    "image/",
+    "text/",
+    "application/pdf",
+    "audio/",
+    // Office documents
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",     // .xlsx
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // .docx
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation", // .pptx
+    "application/msword",      // .doc
+    "application/vnd.ms-excel", // .xls
+    // Archives
+    "application/zip",
+    "application/x-zip-compressed",
+    "application/gzip",
+    // Data
+    "application/json",
+];
 
-fn is_allowed_content_type(ct: &str) -> bool {
-    ALLOWED_CONTENT_TYPES
+fn is_allowed_content_type(ct: &str, extra_types: &[String]) -> bool {
+    // Check built-in allowlist (prefix matching)
+    if ALLOWED_CONTENT_TYPES
         .iter()
         .any(|prefix| ct.starts_with(prefix))
+    {
+        return true;
+    }
+    // Check user-configured extra types (prefix matching for flexibility)
+    extra_types.iter().any(|t| ct.starts_with(t.as_str()))
 }
 
 /// POST /api/agents/{id}/upload — Upload a file attachment.
@@ -10210,11 +10300,11 @@ pub async fn upload_file(
         .or(filename_attr)
         .unwrap_or_else(|| "upload".to_string());
 
-    if !is_allowed_content_type(&content_type) {
+    if !is_allowed_content_type(&content_type, &state.kernel.config.upload_extra_types) {
         return (
             StatusCode::BAD_REQUEST,
             Json(
-                serde_json::json!({"error": "Unsupported content type. Allowed: image/*, text/*, audio/*, application/pdf"}),
+                serde_json::json!({"error": "Unsupported content type. Add it to upload_extra_types in config.toml"}),
             ),
         );
     }
@@ -10356,6 +10446,172 @@ pub async fn serve_upload(Path(file_id): Path<String>) -> impl IntoResponse {
             )],
             b"{\"error\":\"File not found on disk\"}".to_vec(),
         ),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Agent Workspace Output — download files generated by agents (e.g. manifests)
+// ---------------------------------------------------------------------------
+
+/// GET /api/agents/{id}/output — List workspace output files.
+pub async fn list_agent_output(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let agent_id: AgentId = match id.parse() {
+        Ok(id) => id,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "Invalid agent ID"})),
+            );
+        }
+    };
+
+    let entry = match state.kernel.registry.get(agent_id) {
+        Some(e) => e,
+        None => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "Agent not found"})),
+            );
+        }
+    };
+
+    let workspace = match entry.manifest.workspace {
+        Some(ref ws) => ws.clone(),
+        None => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "Agent has no workspace"})),
+            );
+        }
+    };
+
+    let output_dir = workspace.join("output");
+    let mut files = Vec::new();
+    if output_dir.exists() {
+        if let Ok(entries) = std::fs::read_dir(&output_dir) {
+            for entry in entries.flatten() {
+                if let Ok(metadata) = entry.metadata() {
+                    if metadata.is_file() {
+                        let name = entry.file_name().to_string_lossy().to_string();
+                        let size = metadata.len();
+                        let modified = metadata
+                            .modified()
+                            .ok()
+                            .and_then(|m| m.duration_since(std::time::SystemTime::UNIX_EPOCH).ok())
+                            .map(|d| d.as_secs())
+                            .unwrap_or(0);
+                        files.push(serde_json::json!({
+                            "name": name,
+                            "size_bytes": size,
+                            "modified_unix": modified,
+                            "download_url": format!("/api/agents/{}/output/{}", agent_id, name),
+                        }));
+                    }
+                }
+            }
+        }
+    }
+
+    (StatusCode::OK, Json(serde_json::json!({ "files": files })))
+}
+
+/// GET /api/agents/{id}/output/{filename} — Download a workspace output file.
+///
+/// Serves files from the agent's workspace `output/` directory with
+/// Content-Disposition: attachment to trigger browser download.
+pub async fn download_agent_output(
+    State(state): State<Arc<AppState>>,
+    Path((id, filename)): Path<(String, String)>,
+) -> axum::response::Response {
+    let agent_id: AgentId = match id.parse() {
+        Ok(id) => id,
+        Err(_) => {
+            return axum::response::IntoResponse::into_response((
+                StatusCode::BAD_REQUEST,
+                [(axum::http::header::CONTENT_TYPE, "application/json".to_string())],
+                b"{\"error\":\"Invalid agent ID\"}".to_vec(),
+            ));
+        }
+    };
+
+    // Validate filename: no path traversal
+    if filename.contains('/') || filename.contains('\\') || filename.contains("..") {
+        return axum::response::IntoResponse::into_response((
+            StatusCode::BAD_REQUEST,
+            [(axum::http::header::CONTENT_TYPE, "application/json".to_string())],
+            b"{\"error\":\"Invalid filename\"}".to_vec(),
+        ));
+    }
+
+    let entry = match state.kernel.registry.get(agent_id) {
+        Some(e) => e,
+        None => {
+            return axum::response::IntoResponse::into_response((
+                StatusCode::NOT_FOUND,
+                [(axum::http::header::CONTENT_TYPE, "application/json".to_string())],
+                b"{\"error\":\"Agent not found\"}".to_vec(),
+            ));
+        }
+    };
+
+    let workspace = match entry.manifest.workspace {
+        Some(ref ws) => ws.clone(),
+        None => {
+            return axum::response::IntoResponse::into_response((
+                StatusCode::NOT_FOUND,
+                [(axum::http::header::CONTENT_TYPE, "application/json".to_string())],
+                b"{\"error\":\"Agent has no workspace\"}".to_vec(),
+            ));
+        }
+    };
+
+    let file_path = workspace.join("output").join(&filename);
+    if !file_path.exists() {
+        return axum::response::IntoResponse::into_response((
+            StatusCode::NOT_FOUND,
+            [(axum::http::header::CONTENT_TYPE, "application/json".to_string())],
+            b"{\"error\":\"File not found\"}".to_vec(),
+        ));
+    }
+
+    let content_type = match filename.rsplit('.').next() {
+        Some("json") => "application/json",
+        Some("csv") => "text/csv",
+        Some("xlsx") => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        Some("xls") => "application/vnd.ms-excel",
+        Some("docx") => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        Some("pdf") => "application/pdf",
+        Some("txt") => "text/plain",
+        Some("md") => "text/markdown",
+        Some("zip") => "application/zip",
+        Some("xml") => "application/xml",
+        Some("yaml") | Some("yml") => "text/yaml",
+        _ => "application/octet-stream",
+    };
+
+    match std::fs::read(&file_path) {
+        Ok(data) => {
+            let mut headers = axum::http::header::HeaderMap::new();
+            headers.insert(
+                axum::http::header::CONTENT_TYPE,
+                content_type.parse().unwrap(),
+            );
+            headers.insert(
+                axum::http::header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{}\"", filename)
+                    .parse()
+                    .unwrap(),
+            );
+            axum::response::IntoResponse::into_response((StatusCode::OK, headers, data))
+        }
+        Err(_) => axum::response::IntoResponse::into_response((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            [(axum::http::header::CONTENT_TYPE, "application/json".to_string())],
+            b"{\"error\":\"Failed to read file\"}".to_vec(),
+        )),
     }
 }
 

@@ -1173,8 +1173,12 @@ function chatPage() {
     addFiles(files) {
       var self = this;
       var allowed = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'text/plain', 'application/pdf',
-                      'text/markdown', 'application/json', 'text/csv'];
-      var allowedExts = ['.txt', '.pdf', '.md', '.json', '.csv'];
+                      'text/markdown', 'application/json', 'text/csv',
+                      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                      'application/msword',
+                      'application/zip', 'application/x-zip-compressed'];
+      var allowedExts = ['.txt', '.pdf', '.md', '.json', '.csv', '.xlsx', '.xls', '.docx', '.doc', '.pptx', '.zip'];
       for (var i = 0; i < files.length; i++) {
         var file = files[i];
         if (file.size > 10 * 1024 * 1024) {

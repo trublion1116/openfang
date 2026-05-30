@@ -1,0 +1,43 @@
+# OpenFang Manifest Hand 部署示例
+#
+# 使用步骤：
+#   1. 加载镜像：docker load < openfang-0.6.4-offline-manifest.tar.gz
+#   2. 创建 .env 文件写入 API Key（见下方）
+#   3. 启动：docker compose -f docker-compose.manifest.yml up -d
+#   4. 访问：http://localhost:4200
+#   5. 在 Dashboard → Hands 页面激活 Manifest Hand
+#
+# .env 文件内容：
+#   OPENAI_API_KEY=your-api-key-here
+
+services:
+  openfang:
+    image: openfang:0.6.4-offline-manifest
+    container_name: openfang-manifest
+    ports:
+      - "4200:4200"
+    volumes:
+      # 持久化数据（config、workspace、memory 等）
+      - openfang-data:/data
+      # Hand 定义文件（激活后 agent 会加载这些配置）
+      - ./hands:/opt/openfang/hands:ro
+    environment:
+      # LLM API Key（必填，根据 config.toml 中的 provider 设置对应的 key）
+      - OPENAI_API_KEY=${OPENAI_API_KEY:?请在 .env 文件中设置 OPENAI_API_KEY}
+
+      # ── 以下为可选配置，按需取消注释 ──────────────────────────────
+
+      # 如果 config.toml 中的 default_model 使用 GROQ
+      # - GROQ_API_KEY=${GROQ_API_KEY}
+
+      # 监听地址（默认 0.0.0.0:4200）
+      # - OPENFANG_LISTEN=0.0.0.0:4200
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4200/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  openfang-data:

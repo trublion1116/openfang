@@ -35,6 +35,9 @@ COPY --from=builder /build/target/release/openfang /usr/local/bin/openfang
 # Agent templates
 COPY --from=builder /build/agents /opt/openfang/agents
 
+# Hands (workspace-mountable hand definitions)
+COPY --from=builder /build/hands /opt/openfang/hands
+
 # Default config (GLM via OpenAI-compatible API)
 COPY <<EOF /etc/openfang/config.toml
 [default_model]
@@ -54,6 +57,11 @@ decay_rate = 0.05
 # timeout_secs: request timeout in seconds (default: 30)
 # enabled = false
 # timeout_secs = 30
+
+# File upload: extra allowed MIME types beyond built-in defaults
+# Built-in: image/*, text/*, application/pdf, audio/*, Office docs, ZIP
+# Add custom types here:
+# upload_extra_types = ["application/x-7z-compressed", "application/rtf"]
 EOF
 
 EXPOSE 4200

@@ -3,13 +3,17 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.offline
-    image: openfang:0.6.4-offline
+    image: openfang:0.6.4-offline-manifest
     ports:
       - "4200:4200"
     volumes:
       - openfang-data:/data
+      # Mount hands directory for runtime hand loading
+      - ./hands:/opt/openfang/hands:ro
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY:?请设置 OPENAI_API_KEY 环境变量}
+      # Uncomment for manifest hand:
+      # - GROQ_API_KEY=${GROQ_API_KEY}
     restart: unless-stopped
 
 volumes:

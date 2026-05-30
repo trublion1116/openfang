@@ -275,6 +275,15 @@ pub async fn build_router(
             "/api/agents/{id}/deliveries",
             axum::routing::get(routes::get_agent_deliveries),
         )
+        // Agent workspace output files (e.g. generated manifests)
+        .route(
+            "/api/agents/{id}/output",
+            axum::routing::get(routes::list_agent_output),
+        )
+        .route(
+            "/api/agents/{id}/output/{filename}",
+            axum::routing::get(routes::download_agent_output),
+        )
         .route(
             "/api/agents/{id}/upload",
             axum::routing::post(routes::upload_file),

@@ -1239,6 +1239,20 @@ pub struct KernelConfig {
     /// Agent execution configuration (tool timeouts, etc.).
     #[serde(default)]
     pub agent: AgentConfig,
+    /// Additional allowed MIME types for file uploads (beyond the built-in defaults).
+    /// Each entry is a full MIME type string (e.g., "application/vnd.ms-excel")
+    /// or a prefix (e.g., "image/", "application/vnd.").
+    ///
+    /// Example `~/.openfang/config.toml`:
+    /// ```toml
+    /// upload_extra_types = [
+    ///     "application/vnd.ms-excel",
+    ///     "application/x-7z-compressed",
+    ///     "application/rtf",
+    /// ]
+    /// ```
+    #[serde(default)]
+    pub upload_extra_types: Vec<String>,
 }
 
 /// Heartbeat monitor settings exposed in `[heartbeat]` config section.
@@ -1488,6 +1502,7 @@ impl Default for KernelConfig {
             heartbeat: HeartbeatSettings::default(),
             skills: HashMap::new(),
             agent: AgentConfig::default(),
+            upload_extra_types: Vec::new(),
         }
     }
 }
