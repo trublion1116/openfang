@@ -12,6 +12,7 @@ COPY crates ./crates
 COPY xtask ./xtask
 COPY agents ./agents
 COPY packages ./packages
+COPY hands ./hands
 
 # Release build with reasonable LTO for smaller binary
 ARG LTO=true
