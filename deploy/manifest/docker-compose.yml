@@ -1,0 +1,73 @@
+# OpenFang Manifest Hand + MCP OBS S3 部署
+#
+# 使用步骤：
+#   1. 加载镜像：
+#      docker load < openfang-0.6.4-offline-manifest.tar.gz
+#      docker load < mcp-obs-s3-1.1.0.tar.gz
+#
+#   2. 复制 .env.example 为 .env 并填写配置：
+#      cp .env.example .env
+#      vim .env
+#
+#   3. 启动：
+#      docker compose up -d
+#
+#   4. 访问 Dashboard：http://localhost:4200
+#      在 Hands 页面激活 Manifest Hand
+#
+#   5. 上传文件测试：在 chat 界面上传 xlsx/docx/zip 等文件
+
+services:
+  # ── OpenFang Agent OS ──────────────────────────────────────────────
+  openfang:
+    image: openfang:0.6.4-offline-manifest
+    container_name: openfang-manifest
+    ports:
+      - "4200:4200"
+    volumes:
+      # 持久化数据（config、workspace、memory）
+      - openfang-data:/data
+      # Hand 定义文件（启动时 load_workspace_hands 自动加载）
+      - ./hands:/opt/openfang/hands:ro
+      # config.toml（MCP S3 连接配置、LLM 配置等）
+      - ./config.toml:/etc/openfang/config.toml:ro
+    environment:
+      # LLM API Key（必填）
+      - OPENAI_API_KEY=${OPENAI_API_KEY:?请在 .env 中设置 OPENAI_API_KEY}
+      # MCP OBS S3 环境变量（Hand agent 调用 MCP 时需要）
+      - OBS_ACCESS_KEY_ID=${OBS_ACCESS_KEY_ID:-}
+      - OBS_SECRET_ACCESS_KEY=${OBS_SECRET_ACCESS_KEY:-}
+      - OBS_ENDPOINT=${OBS_ENDPOINT:-}
+      - OBS_BUCKET=${OBS_BUCKET:-}
+    depends_on:
+      mcp-obs-s3:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:4200/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ── MCP OBS S3 Server ─────────────────────────────────────────────
+  mcp-obs-s3:
+    image: mcp-obs-s3:1.1.0
+    container_name: mcp-obs-s3
+    environment:
+      - MCP_TRANSPORT=http
+      - MCP_PORT=3100
+      - OBS_ACCESS_KEY_ID=${OBS_ACCESS_KEY_ID:?请在 .env 中设置 OBS_ACCESS_KEY_ID}
+      - OBS_SECRET_ACCESS_KEY=${OBS_SECRET_ACCESS_KEY:?请在 .env 中设置 OBS_SECRET_ACCESS_KEY}
+      - OBS_ENDPOINT=${OBS_ENDPOINT:?请在 .env 中设置 OBS_ENDPOINT}
+      - OBS_BUCKET=${OBS_BUCKET:?请在 .env 中设置 OBS_BUCKET}
+      - OBS_UPLOAD_PREFIX=${OBS_UPLOAD_PREFIX:-uploads/}
+      - OBS_URL_EXPIRES=${OBS_URL_EXPIRES:-3600}
+    restart: unless-stopped
+    # 不需要暴露端口到宿主机，只有 openfang 容器访问
+    # 如需调试可取消注释：
+    # ports:
+    #   - "3100:3100"
+
+volumes:
+  openfang-data:

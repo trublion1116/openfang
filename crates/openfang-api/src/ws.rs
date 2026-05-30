@@ -536,7 +536,9 @@ async fn handle_text_message(
                 return;
             }
 
-            // Resolve file attachments into image content blocks
+            // Resolve file attachments into content blocks.
+            // For Hand agents: inject file metadata as text (non-multimodal pipeline).
+            // For regular agents: use base64 image block resolution.
             let mut has_images = false;
             let mut ws_content_blocks: Option<Vec<openfang_types::message::ContentBlock>> = None;
             if let Some(attachments) = parsed["attachments"].as_array() {
@@ -545,10 +547,18 @@ async fn handle_text_message(
                     .filter_map(|a| serde_json::from_value(a.clone()).ok())
                     .collect();
                 if !refs.is_empty() {
-                    let image_blocks = crate::routes::resolve_attachments(&refs);
-                    if !image_blocks.is_empty() {
-                        has_images = true;
-                        ws_content_blocks = Some(image_blocks);
+                    let is_hand = state.kernel.hand_registry.find_by_agent(agent_id).is_some();
+                    if is_hand {
+                        let file_blocks = crate::routes::resolve_hand_attachments(&refs);
+                        if !file_blocks.is_empty() {
+                            ws_content_blocks = Some(file_blocks);
+                        }
+                    } else {
+                        let image_blocks = crate::routes::resolve_attachments(&refs);
+                        if !image_blocks.is_empty() {
+                            has_images = true;
+                            ws_content_blocks = Some(image_blocks);
+                        }
                     }
                 }
             }
