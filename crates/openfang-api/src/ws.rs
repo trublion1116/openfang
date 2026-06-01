@@ -541,6 +541,7 @@ async fn handle_text_message(
             // For regular agents: use base64 image block resolution.
             let mut has_images = false;
             let mut ws_content_blocks: Option<Vec<openfang_types::message::ContentBlock>> = None;
+            let mut ws_content = content.clone();
             if let Some(attachments) = parsed["attachments"].as_array() {
                 let refs: Vec<crate::types::AttachmentRef> = attachments
                     .iter()
@@ -559,7 +560,40 @@ async fn handle_text_message(
                             workspace.as_deref(),
                         );
                         if !file_blocks.is_empty() {
-                            ws_content_blocks = Some(file_blocks);
+                            // Extract FILE_ATTACHMENT text from blocks
+                            let attachment_texts: Vec<String> = file_blocks
+                                .iter()
+                                .filter_map(|b| match b {
+                                    openfang_types::message::ContentBlock::Text { text, .. } => Some(text.clone()),
+                                    _ => None,
+                                })
+                                .collect();
+                            // Strip [File: ...] from message text
+                            let mut cleaned = ws_content.clone();
+                            while let Some(start) = cleaned.find("[File:") {
+                                if let Some(end) = cleaned[start..].find(']') {
+                                    cleaned = format!("{}{}", &cleaned[..start], &cleaned[start + end + 1..]);
+                                } else {
+                                    break;
+                                }
+                            }
+                            while let Some(start) = cleaned.find("【File:") {
+                                if let Some(end) = cleaned[start..].find('】') {
+                                    cleaned = format!("{}{}", &cleaned[..start], &cleaned[start + end + '】'.len_utf8()..]);
+                                } else {
+                                    break;
+                                }
+                            }
+                            ws_content = cleaned.trim().to_string();
+                            // Append FILE_ATTACHMENT directly into message text
+                            if !attachment_texts.is_empty() {
+                                ws_content = format!("{}\n{}", ws_content, attachment_texts.join("\n"));
+                            }
+                            tracing::info!(
+                                final_message = %ws_content,
+                                "ws_message: [DEBUG] message with FILE_ATTACHMENT for hand agent"
+                            );
+                            // Do NOT use content_blocks for hand agents
                         }
                     } else {
                         let image_blocks = crate::routes::resolve_attachments(&refs);
@@ -618,7 +652,7 @@ async fn handle_text_message(
                 state.kernel.clone() as Arc<dyn KernelHandle>;
             match state.kernel.send_message_streaming(
                 agent_id,
-                &content,
+                &ws_content,
                 Some(kernel_handle),
                 None,
                 None,
