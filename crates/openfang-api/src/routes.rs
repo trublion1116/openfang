@@ -458,6 +458,7 @@ pub async fn send_message(
     // Resolve file attachments into content blocks.
     // For Hand agents: inject file metadata as text (non-multimodal pipeline).
     // For regular agents: use existing base64 image block resolution.
+    let mut message_text = req.message.clone();
     let content_blocks = if !req.attachments.is_empty() {
         let is_hand = state.kernel.hand_registry.find_by_agent(agent_id).is_some();
         tracing::info!(
@@ -482,6 +483,19 @@ pub async fn send_message(
                 blocks = file_blocks.len(),
                 "send_message: hand attachment blocks generated"
             );
+            // Strip frontend-generated "[File: xxx]" from message text so the
+            // agent only sees the structured [FILE_ATTACHMENT] block.
+            if !file_blocks.is_empty() {
+                let mut cleaned = message_text.clone();
+                while let Some(start) = cleaned.find("[File:") {
+                    if let Some(end) = cleaned[start..].find(']') {
+                        cleaned = format!("{}{}", &cleaned[..start], &cleaned[start + end + 1..]);
+                    } else {
+                        break;
+                    }
+                }
+                message_text = cleaned.trim().to_string();
+            }
             if file_blocks.is_empty() {
                 None
             } else {
@@ -504,7 +518,7 @@ pub async fn send_message(
         .kernel
         .send_message_with_handle_and_blocks(
             agent_id,
-            &req.message,
+            &message_text,
             Some(kernel_handle),
             content_blocks,
             req.sender_id,
