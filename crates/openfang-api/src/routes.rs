@@ -489,14 +489,40 @@ pub async fn send_message(
                 blocks = file_blocks.len(),
                 "send_message: hand attachment blocks generated"
             );
-            // Strip frontend-generated "[File: xxx]" from message text so the
-            // agent only sees the structured [FILE_ATTACHMENT] block.
+            // Extract FILE_ATTACHMENT text from blocks and inject directly into
+            // message_text so MCP tools can see it (they only read plain text,
+            // not content blocks).
             if !file_blocks.is_empty() {
-                tracing::info!(
-                    before_strip = %message_text,
-                    "send_message: [DEBUG] message BEFORE stripping [File:...]"
-                );
+                let attachment_texts: Vec<String> = file_blocks
+                    .iter()
+                    .filter_map(|b| match b {
+                        openfang_types::message::ContentBlock::Text { text, .. } => Some(text.clone()),
+                        _ => None,
+                    })
+                    .collect();
+
+                // Strip any frontend-generated "[File: ...]" / "【File: ...】"
+                // patterns (handles full-width brackets, spaces, etc.)
+                // Debug: dump hex around the "[File" area to catch encoding issues.
+                if let Some(pos) = message_text.find("File:") {
+                    let start = pos.saturating_sub(5);
+                    let end = (pos + 30).min(message_text.len());
+                    let snippet = &message_text[start..end];
+                    let hex: Vec<String> = snippet.chars()
+                        .take(20)
+                        .map(|c| format!("{}(U+{:04X})", c, c as u32))
+                        .collect();
+                    tracing::info!(
+                        hex_dump = hex.join(" "),
+                        "send_message: [DEBUG] hex dump around 'File:' in message"
+                    );
+                } else {
+                    tracing::info!(
+                        "send_message: [DEBUG] 'File:' NOT found in message_text at all"
+                    );
+                }
                 let mut cleaned = message_text.clone();
+                // Strip half-width [File: ...]
                 while let Some(start) = cleaned.find("[File:") {
                     if let Some(end) = cleaned[start..].find(']') {
                         cleaned = format!("{}{}", &cleaned[..start], &cleaned[start + end + 1..]);
@@ -504,17 +530,39 @@ pub async fn send_message(
                         break;
                     }
                 }
-                message_text = cleaned.trim().to_string();
+                // Strip full-width 【File: ...】
+                while let Some(start) = cleaned.find("【File:") {
+                    if let Some(end) = cleaned[start..].find('】') {
+                        cleaned = format!("{}{}", &cleaned[..start], &cleaned[start + end + '】'.len_utf8()..]);
+                    } else {
+                        break;
+                    }
+                }
+                let cleaned = cleaned.trim().to_string();
                 tracing::info!(
-                    after_strip = %message_text,
-                    "send_message: [DEBUG] message AFTER stripping [File:...]"
+                    before_strip = %message_text,
+                    after_strip = %cleaned,
+                    "send_message: [DEBUG] stripped [File:...] from message"
                 );
+                message_text = cleaned;
+
+                // Append FILE_ATTACHMENT texts directly into the message
+                if !attachment_texts.is_empty() {
+                    let appended = format!(
+                        "{}\n{}",
+                        message_text,
+                        attachment_texts.join("\n")
+                    );
+                    tracing::info!(
+                        final_message = %appended,
+                        "send_message: [DEBUG] message with FILE_ATTACHMENT appended"
+                    );
+                    message_text = appended;
+                }
             }
-            if file_blocks.is_empty() {
-                None
-            } else {
-                Some(file_blocks)
-            }
+            // Return None — hand agent attachments are embedded in message_text,
+            // not passed as content_blocks. This ensures MCP tools can read them.
+            None
         } else {
             let image_blocks = resolve_attachments(&req.attachments);
             if image_blocks.is_empty() {
