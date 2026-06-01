@@ -13,7 +13,7 @@ use openfang_types::tool_compat::normalize_tool_name;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 /// Maximum inter-agent call depth to prevent infinite recursion (A->B->C->...).
 const MAX_AGENT_CALL_DEPTH: u32 = 5;
@@ -491,10 +491,11 @@ pub async fn execute_tool(
                         mcp::extract_mcp_server_from_known(other, &known_refs)
                     {
                         if let Some(conn) = conns.iter_mut().find(|c| c.name() == server_name) {
-                            debug!(
+                            info!(
                                 tool = other,
                                 server = server_name,
-                                "Dispatching to MCP server"
+                                input = %input,
+                                "MCP tool call: [DEBUG] LLM-constructed arguments received by MCP"
                             );
                             match conn.call_tool(other, input).await {
                                 Ok(content) => Ok(content),
