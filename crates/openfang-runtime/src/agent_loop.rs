@@ -234,11 +234,22 @@ pub struct AgentLoopResult {
 /// first block followed by the images so the LLM sees the full multimodal
 /// turn. When only one is present the single-mode representation is used.
 fn build_user_turn_message(user_message: &str, blocks: Option<Vec<ContentBlock>>) -> Message {
+    tracing::info!(
+        user_message = %user_message,
+        has_blocks = blocks.is_some(),
+        blocks_count = blocks.as_ref().map(|b| b.len()).unwrap_or(0),
+        "build_user_turn_message: [DEBUG] constructing user turn"
+    );
     match blocks {
         Some(blocks) if !blocks.is_empty() => {
+            for (i, b) in blocks.iter().enumerate() {
+                tracing::info!(block_idx = i, block = ?b, "build_user_turn_message: [DEBUG] block content");
+            }
             if user_message.trim().is_empty() {
+                tracing::info!("build_user_turn_message: [DEBUG] message empty, using blocks only");
                 Message::user_with_blocks(blocks)
             } else {
+                tracing::info!("build_user_turn_message: [DEBUG] prepending text block then file blocks");
                 let mut combined = Vec::with_capacity(blocks.len() + 1);
                 combined.push(ContentBlock::Text {
                     text: user_message.to_string(),
@@ -248,7 +259,10 @@ fn build_user_turn_message(user_message: &str, blocks: Option<Vec<ContentBlock>>
                 Message::user_with_blocks(combined)
             }
         }
-        _ => Message::user(user_message),
+        _ => {
+            tracing::info!("build_user_turn_message: [DEBUG] no blocks, plain text message");
+            Message::user(user_message)
+        }
     }
 }
 
@@ -368,9 +382,13 @@ pub async fn run_agent_loop(
     // Add the user message to session history.
     // When content blocks are provided (e.g. text + image from a channel),
     // combine them with the user text so the LLM sees the full multimodal turn.
-    session
-        .messages
-        .push(build_user_turn_message(user_message, user_content_blocks));
+    let user_turn = build_user_turn_message(user_message, user_content_blocks);
+    tracing::info!(
+        role = ?user_turn.role,
+        content_preview = ?user_turn.content,
+        "run_agent_loop: [DEBUG] user turn pushed to session"
+    );
+    session.messages.push(user_turn);
 
     // Build the messages for the LLM, filtering system messages
     // System prompt goes into the separate `system` field.
@@ -1580,9 +1598,13 @@ pub async fn run_agent_loop_streaming(
     // Add the user message to session history.
     // When content blocks are provided (e.g. text + image from a channel),
     // combine them with the user text so the LLM sees the full multimodal turn.
-    session
-        .messages
-        .push(build_user_turn_message(user_message, user_content_blocks));
+    let user_turn = build_user_turn_message(user_message, user_content_blocks);
+    tracing::info!(
+        role = ?user_turn.role,
+        content_preview = ?user_turn.content,
+        "run_agent_loop_streaming: [DEBUG] user turn pushed to session"
+    );
+    session.messages.push(user_turn);
 
     let llm_messages: Vec<Message> = session
         .messages

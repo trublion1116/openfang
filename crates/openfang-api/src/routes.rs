@@ -459,6 +459,12 @@ pub async fn send_message(
     // For Hand agents: inject file metadata as text (non-multimodal pipeline).
     // For regular agents: use existing base64 image block resolution.
     let mut message_text = req.message.clone();
+    tracing::info!(
+        agent_id = %agent_id,
+        raw_message = %req.message,
+        attachments_count = req.attachments.len(),
+        "send_message: [DEBUG] raw input before processing"
+    );
     let content_blocks = if !req.attachments.is_empty() {
         let is_hand = state.kernel.hand_registry.find_by_agent(agent_id).is_some();
         tracing::info!(
@@ -486,6 +492,10 @@ pub async fn send_message(
             // Strip frontend-generated "[File: xxx]" from message text so the
             // agent only sees the structured [FILE_ATTACHMENT] block.
             if !file_blocks.is_empty() {
+                tracing::info!(
+                    before_strip = %message_text,
+                    "send_message: [DEBUG] message BEFORE stripping [File:...]"
+                );
                 let mut cleaned = message_text.clone();
                 while let Some(start) = cleaned.find("[File:") {
                     if let Some(end) = cleaned[start..].find(']') {
@@ -495,6 +505,10 @@ pub async fn send_message(
                     }
                 }
                 message_text = cleaned.trim().to_string();
+                tracing::info!(
+                    after_strip = %message_text,
+                    "send_message: [DEBUG] message AFTER stripping [File:...]"
+                );
             }
             if file_blocks.is_empty() {
                 None
@@ -510,8 +524,29 @@ pub async fn send_message(
             }
         }
     } else {
+        tracing::info!(
+            agent_id = %agent_id,
+            "send_message: [DEBUG] no attachments in request, content_blocks=None"
+        );
         None
     };
+
+    tracing::info!(
+        agent_id = %agent_id,
+        final_message = %message_text,
+        has_content_blocks = content_blocks.is_some(),
+        blocks_count = content_blocks.as_ref().map(|b| b.len()).unwrap_or(0),
+        "send_message: [DEBUG] FINAL state before kernel dispatch"
+    );
+    if let Some(ref blocks) = content_blocks {
+        for (i, block) in blocks.iter().enumerate() {
+            tracing::info!(
+                block_index = i,
+                block_preview = ?block,
+                "send_message: [DEBUG] content_block detail"
+            );
+        }
+    }
 
     let kernel_handle: Arc<dyn KernelHandle> = state.kernel.clone() as Arc<dyn KernelHandle>;
     match state
