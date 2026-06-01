@@ -26,13 +26,13 @@ services:
       - "4200:4200"
     volumes:
       # 持久化数据（config、workspace、memory）
+      # agent workspace 在 /data/workspaces/<agent-name>/ 下
+      # 上传文件被拷贝到 /data/workspaces/<agent-name>/uploads/<uuid>
       - openfang-data:/data
       # Hand 定义文件（启动时 load_workspace_hands 自动加载）
       - ./hands:/opt/openfang/hands:ro
       # config.toml（MCP S3 连接配置、LLM 配置等）
       - ./config.toml:/etc/openfang/config.toml:ro
-      # 共享上传目录：OpenFang 保存文件 → MCP 读取文件上传到 S3
-      - openfang-uploads:/tmp/openfang_uploads
     environment:
       # LLM API Key（必填）
       - OPENAI_API_KEY=${OPENAI_API_KEY:?请在 .env 中设置 OPENAI_API_KEY}
@@ -52,8 +52,9 @@ services:
     image: mcp-obs-s3:1.1.0
     container_name: mcp-obs-s3
     volumes:
-      # 挂载共享上传目录（只读），MCP s3_upload 读取文件从这里取
-      - openfang-uploads:/tmp/openfang_uploads:ro
+      # 共享 openfang-data volume（只读），MCP s3_upload 读取 workspace 下的文件
+      # 文件路径: /data/workspaces/<agent-name>/uploads/<uuid>
+      - openfang-data:/data:ro
     environment:
       - MCP_TRANSPORT=http
       - MCP_PORT=3100
@@ -71,5 +72,3 @@ services:
 
 volumes:
   openfang-data:
-  # 共享上传目录：OpenFang 写入，MCP 读取
-  openfang-uploads:

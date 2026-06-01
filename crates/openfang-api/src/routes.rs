@@ -296,6 +296,7 @@ pub fn resolve_attachments(
 /// file paths and upload them via MCP tools without multimodal processing.
 pub fn resolve_hand_attachments(
     attachments: &[AttachmentRef],
+    workspace_dir: Option<&std::path::Path>,
 ) -> Vec<openfang_types::message::ContentBlock> {
     let upload_dir = std::env::temp_dir().join("openfang_uploads");
     let mut blocks = Vec::new();
@@ -315,11 +316,27 @@ pub fn resolve_hand_attachments(
             continue;
         }
 
-        let file_path = upload_dir.join(&att.file_id);
+        let src_path = upload_dir.join(&att.file_id);
         let filename = meta
             .as_ref()
             .map(|m| m.filename.clone())
             .unwrap_or_else(|| att.filename.clone());
+
+        // Copy file into agent workspace so the path is sandbox-accessible.
+        // MCP tools in a separate container read from a shared volume mounted
+        // at the same path; the workspace-based path satisfies the sandbox
+        // check while remaining readable by the MCP container.
+        let file_path = if let Some(ws) = workspace_dir {
+            let uploads_sub = ws.join("uploads");
+            let _ = std::fs::create_dir_all(&uploads_sub);
+            let dest = uploads_sub.join(&att.file_id);
+            if src_path.exists() && !dest.exists() {
+                let _ = std::fs::copy(&src_path, &dest);
+            }
+            dest
+        } else {
+            src_path
+        };
 
         let size = std::fs::metadata(&file_path).map(|m| m.len()).unwrap_or(0);
 
@@ -424,7 +441,13 @@ pub async fn send_message(
     let content_blocks = if !req.attachments.is_empty() {
         let is_hand = state.kernel.hand_registry.find_by_agent(agent_id).is_some();
         if is_hand {
-            let file_blocks = resolve_hand_attachments(&req.attachments);
+            let workspace = state
+                .kernel
+                .registry
+                .get(agent_id)
+                .and_then(|e| e.manifest.workspace);
+            let file_blocks =
+                resolve_hand_attachments(&req.attachments, workspace.as_deref());
             if file_blocks.is_empty() {
                 None
             } else {

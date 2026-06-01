@@ -549,7 +549,15 @@ async fn handle_text_message(
                 if !refs.is_empty() {
                     let is_hand = state.kernel.hand_registry.find_by_agent(agent_id).is_some();
                     if is_hand {
-                        let file_blocks = crate::routes::resolve_hand_attachments(&refs);
+                        let workspace = state
+                            .kernel
+                            .registry
+                            .get(agent_id)
+                            .and_then(|e| e.manifest.workspace);
+                        let file_blocks = crate::routes::resolve_hand_attachments(
+                            &refs,
+                            workspace.as_deref(),
+                        );
                         if !file_blocks.is_empty() {
                             ws_content_blocks = Some(file_blocks);
                         }
