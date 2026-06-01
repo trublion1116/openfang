@@ -560,38 +560,9 @@ async fn handle_text_message(
                             workspace.as_deref(),
                         );
                         if !file_blocks.is_empty() {
-                            // Extract FILE_ATTACHMENT text from blocks
-                            let attachment_texts: Vec<String> = file_blocks
-                                .iter()
-                                .filter_map(|b| match b {
-                                    openfang_types::message::ContentBlock::Text { text, .. } => Some(text.clone()),
-                                    _ => None,
-                                })
-                                .collect();
-                            // Strip [File: ...] from message text
-                            let mut cleaned = ws_content.clone();
-                            while let Some(start) = cleaned.find("[File:") {
-                                if let Some(end) = cleaned[start..].find(']') {
-                                    cleaned = format!("{}{}", &cleaned[..start], &cleaned[start + end + 1..]);
-                                } else {
-                                    break;
-                                }
-                            }
-                            while let Some(start) = cleaned.find("【File:") {
-                                if let Some(end) = cleaned[start..].find('】') {
-                                    cleaned = format!("{}{}", &cleaned[..start], &cleaned[start + end + '】'.len_utf8()..]);
-                                } else {
-                                    break;
-                                }
-                            }
-                            ws_content = cleaned.trim().to_string();
-                            // Append FILE_ATTACHMENT directly into message text
-                            if !attachment_texts.is_empty() {
-                                ws_content = format!("{}\n{}", ws_content, attachment_texts.join("\n"));
-                            }
-                            tracing::info!(
-                                final_message = %ws_content,
-                                "ws_message: [DEBUG] message with FILE_ATTACHMENT for hand agent"
+                            ws_content = crate::routes::inject_hand_attachments_into_message(
+                                &ws_content,
+                                &file_blocks,
                             );
                             // Do NOT use content_blocks for hand agents
                         }

@@ -5,66 +5,76 @@
 用户在前端 Chat 发送带文件附件的消息时，数据经过以下完整链路：
 
 ```
-前端 → API 层 → Kernel → Agent Loop → LLM → Tool Runner → MCP Server
+前端 → WebSocket (ws.rs) → Kernel → Agent Loop → LLM → Tool Runner → MCP Server
 ```
 
 ---
 
 ## 1. 前端发送请求
 
-前端通过 SSE streaming 端点发送消息（**不是** REST `/message` 端点）：
+前端通过 **WebSocket** 发送消息（不是 REST 端点）：
 
-```
-POST /api/agents/{id}/stream
-Body: {
-  "message": "请处理 [File: document.pdf]",
-  "attachments": [{ "file_id": "uuid-xxx", "filename": "document.pdf", "content_type": "application/pdf" }],
-  "sender_id": "user-1",
-  "sender_name": "admin"
+```json
+{
+  "type": "message",
+  "content": "请处理 [File: document.pdf]",
+  "attachments": [
+    {"file_id": "uuid-xxx", "filename": "document.pdf", "content_type": "application/pdf"}
+  ]
 }
 ```
 
 关键点：
-- `[File: xxx]` 是前端自动插入的文件标记，随 `message` 文本一起发送
+- `[File: xxx]` 是前端自动插入的文件标记，随 `content` 文本一起发送
 - `attachments` 数组包含上传文件的元数据（file_id、filename、content_type）
 
 ---
 
-## 2. API 层路由（routes.rs）
+## 2. API 层路由
 
-### 两个入口
+### 三个消息入口
 
-| 端点 | 函数 | 前端是否使用 |
-|------|------|:---:|
-| `POST /api/agents/{id}/stream` | `send_message_stream` | 是（前端默认） |
-| `POST /api/agents/{id}/message` | `send_message` | 否 |
+| 入口 | 文件 | 函数 | 前端是否使用 |
+|------|------|------|:---:|
+| WebSocket | `ws.rs` | WS message handler | **是（前端默认）** |
+| REST SSE | `routes.rs` | `send_message_stream` | 否 |
+| REST API | `routes.rs` | `send_message` | 否 |
 
-**前端走的是 streaming 路径**，这是排查问题的关键发现。
+**前端 Chat 走的是 WebSocket 路径**（`ws.rs`），这是排查问题的关键发现。
 
-### Hand Agent 附件处理（streaming 端点）
+> 排查过程：先排查了 REST `send_message` → 没日志；再排查 REST `send_message_stream` → 也没日志；最终定位到 `ws.rs` 才是实际入口。
+
+### 三个入口共用同一套附件处理逻辑
+
+所有入口对 hand agent 的附件处理都调用同一个公共函数 `inject_hand_attachments_into_message()`：
+
+```rust
+// routes.rs — 公共函数
+pub fn inject_hand_attachments_into_message(
+    message: &str,
+    file_blocks: &[ContentBlock],
+) -> String
+```
+
+### 调用方式（三个入口一致）
 
 ```
-send_message_stream()
+入口函数（ws.rs / send_message / send_message_stream）
   ├── 1. 判断是否为 hand agent
   │     hand_registry.find_by_agent(agent_id)
   │
   ├── 2. resolve_hand_attachments() 生成 FILE_ATTACHMENT 文本
   │     ├── 从 UPLOAD_REGISTRY 查找文件元数据
   │     ├── 将文件从临时目录复制到 agent workspace/uploads/
-  │     └── 生成 "[FILE_ATTACHMENT] filename=... path=..." 文本
+  │     └── 生成 "[FILE_ATTACHMENT] filename=... path=..." 文本 block
   │
-  ├── 3. 清理 message_text 中的 [File: xxx]
-  │     ├── 去掉半角 [File: ...]
-  │     └── 去掉全角 【File: ...】
+  ├── 3. inject_hand_attachments_into_message()
+  │     ├── 清理 [File: xxx]（半角/全角）
+  │     └── 拼接 FILE_ATTACHMENT 文本到 message
   │
-  ├── 4. 将 FILE_ATTACHMENT 拼接到 message_text
-  │     "请处理\n[FILE_ATTACHMENT] filename=\"doc.pdf\" path=\"/workspace/uploads/uuid\""
-  │
-  └── 5. 调用 kernel.send_message_streaming(message_text, content_blocks=None)
+  └── 4. 调用 kernel.send_message_streaming(message, content_blocks=None)
+        hand agent 的 content_blocks 始终为 None
 ```
-
-对于 hand agent，`content_blocks` 传 `None`，所有信息都在 `message_text` 里。
-对于普通 agent，走 `resolve_attachments()` 生成 base64 图片 block。
 
 ### 文件路径流转
 
@@ -109,7 +119,6 @@ run_agent_loop_streaming()
   ├── 4. build_user_turn_message(user_message, content_blocks)
   │     ├── content_blocks=None → 纯文本消息 Message::user(text)
   │     └── content_blocks=Some → 多 block 消息
-  │           [Text("用户消息"), Text("[FILE_ATTACHMENT]...")]
   │
   ├── 5. 将 user turn 加入 session
   ├── 6. 构建 LLM 请求 messages（过滤 system 消息）
@@ -120,7 +129,7 @@ run_agent_loop_streaming()
 
 ### build_user_turn_message 构造的消息格式
 
-**纯文本模式**（修复后 hand agent 的路径）：
+**纯文本模式**（hand agent 修复后的路径）：
 ```json
 {
   "role": "user",
@@ -128,13 +137,13 @@ run_agent_loop_streaming()
 }
 ```
 
-**多 Block 模式**（修复前的路径，非 hand agent 仍使用）：
+**多 Block 模式**（非 hand agent，如图片附件）：
 ```json
 {
   "role": "user",
   "content": [
-    {"type": "text", "text": "[File: document.pdf] 请处理"},
-    {"type": "text", "text": "[FILE_ATTACHMENT] filename=\"doc.pdf\" path=\"/workspace/uploads/xxx\""}
+    {"type": "text", "text": "请看这张图片"},
+    {"type": "image", "data": "base64..."}
   ]
 }
 ```
@@ -187,25 +196,27 @@ MCP server（独立进程/容器）接收 tool call：
 ### 问题
 
 ```
-前端走 streaming 端点
-  → send_message_stream 不处理 attachments
-  → content_blocks = None
-  → message_text 保留原始 "[File: xxx]"
-  → LLM 只看到 "[File: xxx]"
+前端通过 WebSocket (ws.rs) 发送消息
+  → ws.rs 不处理 attachments（原样传递）
+  → content_blocks = FILE_ATTACHMENT block，但 message 保留原始 "[File: xxx]"
+  → LLM 收到多 block 模式，只关注第一个 block 的 [File:] 文本
   → LLM 构造的 MCP 参数不包含真实文件路径
   → MCP 无法找到文件
 ```
 
-### 修复（v8）
+### 修复
+
+提取公共函数 `inject_hand_attachments_into_message()`，三个入口统一调用：
 
 ```
-前端走 streaming 端点
-  → send_message_stream 处理 hand attachments
-  → 清理 "[File: xxx]"，拼接 "[FILE_ATTACHMENT] filename=... path=..."
-  → content_blocks = None，全部在 message_text 中
-  → LLM 看到完整的 FILE_ATTACHMENT 信息
+任意入口（ws.rs / send_message / send_message_stream）
+  → resolve_hand_attachments() 生成 file_blocks
+  → inject_hand_attachments_into_message():
+      ├── 清理 "[File: xxx]" 和 "【File: xxx】"
+      └── 拼接 "[FILE_ATTACHMENT] filename=... path=..." 到 message_text
+  → content_blocks = None（hand agent 不用 content blocks）
+  → LLM 收到纯文本，包含完整 FILE_ATTACHMENT 信息
   → LLM 正确提取文件路径传给 MCP
-  → MCP 成功处理文件
 ```
 
 ### 为什么不使用 Content Block
@@ -223,11 +234,21 @@ Content Block（多 block 模式）的问题是：
 
 | 标记 | 位置 | 含义 |
 |------|------|------|
-| `send_message: [DEBUG] raw input` | routes.rs | 原始消息和附件数 |
-| `send_message_stream: resolving attachments` | routes.rs | streaming 路径开始处理附件 |
-| `send_message_stream: hand attachment blocks generated` | routes.rs | 生成了几个 FILE_ATTACHMENT block |
-| `send_message: [DEBUG] stripped [File:...]` | routes.rs | [File:xxx] 清理前后对比 |
-| `send_message: [DEBUG] message with FILE_ATTACHMENT appended` | routes.rs | 最终拼好的消息 |
-| `send_message: [DEBUG] FINAL state before kernel dispatch` | routes.rs | 传给 kernel 前的最终状态 |
+| `send_message: [DEBUG] raw input` | routes.rs | REST send_message 原始输入 |
+| `send_message: resolving attachments` | routes.rs | REST send_message 开始处理附件 |
+| `send_message_stream: resolving attachments` | routes.rs | REST SSE 开始处理附件 |
+| `inject_hand_attachments_into_message: final message` | routes.rs | 公共函数的最终消息（三个入口统一） |
 | `build_user_turn_message: [DEBUG]` | agent_loop.rs | 进入 session 的消息内容 |
 | `MCP tool call: [DEBUG] LLM-constructed arguments` | tool_runner.rs | LLM 传给 MCP 的参数 |
+
+---
+
+## 代码文件索引
+
+| 文件 | 职责 |
+|------|------|
+| `crates/openfang-api/src/routes.rs` | REST 端点 + 公共附件处理函数 |
+| `crates/openfang-api/src/ws.rs` | WebSocket 消息处理 |
+| `crates/openfang-kernel/src/kernel.rs` | Kernel 消息分发 |
+| `crates/openfang-runtime/src/agent_loop.rs` | Agent 执行循环 |
+| `crates/openfang-runtime/src/tool_runner.rs` | 工具执行（含 MCP 调用） |
