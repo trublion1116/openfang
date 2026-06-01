@@ -2,8 +2,8 @@
 #
 # 使用步骤：
 #   1. 加载镜像：
-#      docker load < openfang-0.6.4-offline-manifest.tar.gz
-#      docker load < mcp-obs-s3-1.1.0.tar.gz
+#      docker load < openfang-0.6.4-offline-manifest-v3.tar.gz
+#      docker load < mcp-obs-s3-1.2.0.tar.gz
 #
 #   2. 复制 .env.example 为 .env 并填写配置：
 #      cp .env.example .env
@@ -20,7 +20,7 @@
 services:
   # ── OpenFang Agent OS ──────────────────────────────────────────────
   openfang:
-    image: openfang:0.6.4-offline-manifest
+    image: openfang:0.6.4-offline-manifest-v3
     container_name: openfang-manifest
     ports:
       - "4200:4200"
@@ -49,7 +49,7 @@ services:
 
   # ── MCP OBS S3 Server ─────────────────────────────────────────────
   mcp-obs-s3:
-    image: mcp-obs-s3:1.1.0
+    image: mcp-obs-s3:1.2.0
     container_name: mcp-obs-s3
     volumes:
       # 共享 openfang-data volume（只读），MCP s3_upload 读取 workspace 下的文件

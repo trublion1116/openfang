@@ -302,17 +302,27 @@ pub fn resolve_hand_attachments(
     let mut blocks = Vec::new();
 
     for att in attachments {
+        tracing::info!(
+            file_id = %att.file_id,
+            filename = %att.filename,
+            content_type = %att.content_type,
+            "resolve_hand_attachments: processing attachment"
+        );
         let meta = UPLOAD_REGISTRY.get(&att.file_id);
         let content_type = if let Some(ref m) = meta {
+            tracing::info!(file_id = %att.file_id, "resolve_hand_attachments: found in UPLOAD_REGISTRY");
             m.content_type.clone()
         } else if !att.content_type.is_empty() {
+            tracing::warn!(file_id = %att.file_id, "resolve_hand_attachments: NOT in UPLOAD_REGISTRY, using attachment content_type");
             att.content_type.clone()
         } else {
+            tracing::warn!(file_id = %att.file_id, "resolve_hand_attachments: skipping, no content_type and not in registry");
             continue;
         };
 
         // Validate file_id is a UUID to prevent path traversal
         if uuid::Uuid::parse_str(&att.file_id).is_err() {
+            tracing::warn!(file_id = %att.file_id, "resolve_hand_attachments: skipping, not a valid UUID");
             continue;
         }
 
@@ -326,15 +336,24 @@ pub fn resolve_hand_attachments(
         // MCP tools in a separate container read from a shared volume mounted
         // at the same path; the workspace-based path satisfies the sandbox
         // check while remaining readable by the MCP container.
+        tracing::info!(
+            src = %src_path.display(),
+            src_exists = src_path.exists(),
+            "resolve_hand_attachments: source file check"
+        );
         let file_path = if let Some(ws) = workspace_dir {
             let uploads_sub = ws.join("uploads");
             let _ = std::fs::create_dir_all(&uploads_sub);
             let dest = uploads_sub.join(&att.file_id);
             if src_path.exists() && !dest.exists() {
-                let _ = std::fs::copy(&src_path, &dest);
+                match std::fs::copy(&src_path, &dest) {
+                    Ok(bytes) => tracing::info!(dest = %dest.display(), bytes, "resolve_hand_attachments: copied to workspace"),
+                    Err(e) => tracing::error!(dest = %dest.display(), error = %e, "resolve_hand_attachments: copy failed"),
+                }
             }
             dest
         } else {
+            tracing::warn!("resolve_hand_attachments: no workspace_dir, using src_path");
             src_path
         };
 
@@ -355,6 +374,7 @@ pub fn resolve_hand_attachments(
             size_human,
             file_path.display()
         );
+        tracing::info!(attachment = %file_info, "resolve_hand_attachments: generated");
 
         blocks.push(openfang_types::message::ContentBlock::Text {
             text: file_info,
@@ -440,14 +460,28 @@ pub async fn send_message(
     // For regular agents: use existing base64 image block resolution.
     let content_blocks = if !req.attachments.is_empty() {
         let is_hand = state.kernel.hand_registry.find_by_agent(agent_id).is_some();
+        tracing::info!(
+            agent_id = %agent_id,
+            is_hand = is_hand,
+            attachments = req.attachments.len(),
+            "send_message: resolving attachments"
+        );
         if is_hand {
             let workspace = state
                 .kernel
                 .registry
                 .get(agent_id)
                 .and_then(|e| e.manifest.workspace);
+            tracing::info!(
+                workspace = ?workspace.as_deref().map(|p| p.display().to_string()),
+                "send_message: hand agent workspace"
+            );
             let file_blocks =
                 resolve_hand_attachments(&req.attachments, workspace.as_deref());
+            tracing::info!(
+                blocks = file_blocks.len(),
+                "send_message: hand attachment blocks generated"
+            );
             if file_blocks.is_empty() {
                 None
             } else {
