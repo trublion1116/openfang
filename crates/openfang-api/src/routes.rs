@@ -1684,14 +1684,84 @@ pub async fn send_message_stream(
             .into_response();
     }
 
+    // Resolve hand agent file attachments — same logic as send_message.
+    let mut stream_message_text = req.message.clone();
+    let stream_content_blocks = if !req.attachments.is_empty() {
+        let is_hand = state.kernel.hand_registry.find_by_agent(agent_id).is_some();
+        tracing::info!(
+            agent_id = %agent_id,
+            is_hand = is_hand,
+            attachments = req.attachments.len(),
+            "send_message_stream: resolving attachments"
+        );
+        if is_hand {
+            let workspace = state
+                .kernel
+                .registry
+                .get(agent_id)
+                .and_then(|e| e.manifest.workspace);
+            let file_blocks =
+                resolve_hand_attachments(&req.attachments, workspace.as_deref());
+            tracing::info!(
+                blocks = file_blocks.len(),
+                "send_message_stream: hand attachment blocks generated"
+            );
+            if !file_blocks.is_empty() {
+                let attachment_texts: Vec<String> = file_blocks
+                    .iter()
+                    .filter_map(|b| match b {
+                        openfang_types::message::ContentBlock::Text { text, .. } => Some(text.clone()),
+                        _ => None,
+                    })
+                    .collect();
+                // Strip [File: ...] from message
+                let mut cleaned = stream_message_text.clone();
+                while let Some(start) = cleaned.find("[File:") {
+                    if let Some(end) = cleaned[start..].find(']') {
+                        cleaned = format!("{}{}", &cleaned[..start], &cleaned[start + end + 1..]);
+                    } else {
+                        break;
+                    }
+                }
+                while let Some(start) = cleaned.find("【File:") {
+                    if let Some(end) = cleaned[start..].find('】') {
+                        cleaned = format!("{}{}", &cleaned[..start], &cleaned[start + end + '】'.len_utf8()..]);
+                    } else {
+                        break;
+                    }
+                }
+                stream_message_text = cleaned.trim().to_string();
+                // Append FILE_ATTACHMENT directly into message text
+                if !attachment_texts.is_empty() {
+                    stream_message_text = format!(
+                        "{}\n{}",
+                        stream_message_text,
+                        attachment_texts.join("\n")
+                    );
+                }
+                tracing::info!(
+                    final_message = %stream_message_text,
+                    "send_message_stream: [DEBUG] final message with FILE_ATTACHMENT"
+                );
+            }
+            // Hand agent: FILE_ATTACHMENT in message text, no content blocks
+            None
+        } else {
+            let image_blocks = resolve_attachments(&req.attachments);
+            if image_blocks.is_empty() { None } else { Some(image_blocks) }
+        }
+    } else {
+        None
+    };
+
     let kernel_handle: Arc<dyn KernelHandle> = state.kernel.clone() as Arc<dyn KernelHandle>;
     let (rx, _handle) = match state.kernel.send_message_streaming(
         agent_id,
-        &req.message,
+        &stream_message_text,
         Some(kernel_handle),
         req.sender_id,
         req.sender_name,
-        None, // SSE streaming doesn't support image attachments yet
+        stream_content_blocks,
     ) {
         Ok(pair) => pair,
         Err(e) => {
