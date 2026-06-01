@@ -230,6 +230,29 @@ Content Block（多 block 模式）的问题是：
 
 ---
 
+## 全部消息入口一览
+
+排除 test 文件和 kernel 内部调用，API 层面向用户的所有消息入口：
+
+| # | 文件 | 调用 | 场景 | Hand 附件处理 |
+|---|------|------|------|:---:|
+| 1 | **`ws.rs:624`** | `send_message_streaming` | **前端 Chat（WebSocket）** | 已修复 |
+| 2 | `routes.rs:586` | `send_message_with_handle_and_blocks` | REST `/message` | 已修复 |
+| 3 | `routes.rs:1706` | `send_message_streaming` | REST `/stream`（SSE） | 已修复 |
+| 4 | `openai_compat.rs:326` | `send_message_with_handle` | OpenAI 兼容 API（非流式） | 无 |
+| 5 | `openai_compat.rs:382` | `send_message_streaming` | OpenAI 兼容 API（流式） | 无 |
+| 6 | `channel_bridge.rs`（4 处） | `send_message` | 外部通道（Telegram 等） | 无 |
+| 7 | `routes.rs:6808` | `send_message` | 内部消息路由 | 无 |
+| 8 | `routes.rs:11661` | `send_message` | 其他 API 端点 | 无 |
+| 9 | `routes.rs:12493` | `send_message` | 跨 agent 消息 | 无 |
+
+- **入口 1-3**：前端 Chat 使用的路径，已通过 `inject_hand_attachments_into_message()` 统一处理
+- **入口 4-5**：OpenAI 兼容 API，调用时只传纯文本（无 attachments），暂不需要处理
+- **入口 6**：外部通道（Telegram 等），通过 `send_message` 只传文本，如需支持文件附件需单独处理
+- **入口 7-9**：内部/跨 agent 路径，不涉及前端文件上传场景
+
+---
+
 ## 调试日志标记
 
 | 标记 | 位置 | 含义 |
