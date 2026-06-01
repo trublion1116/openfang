@@ -10360,9 +10360,6 @@ struct UploadMeta {
 /// In-memory upload metadata registry.
 static UPLOAD_REGISTRY: LazyLock<DashMap<String, UploadMeta>> = LazyLock::new(DashMap::new);
 
-/// Maximum upload size: 10 MB.
-const MAX_UPLOAD_SIZE: usize = 10 * 1024 * 1024;
-
 /// Allowed content type prefixes for upload.
 const ALLOWED_CONTENT_TYPES: &[&str] = &[
     "image/",
@@ -10482,11 +10479,12 @@ pub async fn upload_file(
     }
 
     // Validate size
-    if body.len() > MAX_UPLOAD_SIZE {
+    let max_upload_bytes = (state.kernel.config.upload_max_size_mb as usize) * 1024 * 1024;
+    if body.len() > max_upload_bytes {
         return (
             StatusCode::PAYLOAD_TOO_LARGE,
             Json(
-                serde_json::json!({"error": format!("File too large (max {} MB)", MAX_UPLOAD_SIZE / (1024 * 1024))}),
+                serde_json::json!({"error": format!("File too large (max {} MB)", state.kernel.config.upload_max_size_mb)}),
             ),
         );
     }

@@ -287,7 +287,9 @@ pub async fn build_router(
         .route(
             "/api/agents/{id}/upload",
             axum::routing::post(routes::upload_file)
-                .layer(axum::extract::DefaultBodyLimit::max(10 * 1024 * 1024)),
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    (kernel.config.upload_max_size_mb as usize) * 1024 * 1024
+                )),
         )
         .route("/api/agents/{id}/ws", axum::routing::get(ws::agent_ws))
         // Upload serving

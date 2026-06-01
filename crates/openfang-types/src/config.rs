@@ -1253,6 +1253,18 @@ pub struct KernelConfig {
     /// ```
     #[serde(default)]
     pub upload_extra_types: Vec<String>,
+    /// Maximum upload file size in MB. Default: 10.
+    ///
+    /// Example `~/.openfang/config.toml`:
+    /// ```toml
+    /// upload_max_size_mb = 50
+    /// ```
+    #[serde(default = "default_upload_max_size_mb")]
+    pub upload_max_size_mb: u64,
+}
+
+fn default_upload_max_size_mb() -> u64 {
+    10
 }
 
 /// Heartbeat monitor settings exposed in `[heartbeat]` config section.
@@ -1503,6 +1515,7 @@ impl Default for KernelConfig {
             skills: HashMap::new(),
             agent: AgentConfig::default(),
             upload_extra_types: Vec::new(),
+            upload_max_size_mb: default_upload_max_size_mb(),
         }
     }
 }
