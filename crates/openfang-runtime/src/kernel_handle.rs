@@ -128,6 +128,12 @@ pub trait KernelHandle: Send + Sync {
         std::time::Duration::from_secs(30)
     }
 
+    /// Return the SSRF allowlist from the kernel configuration.
+    /// Used by tools (e.g. a2a_send) to permit private/internal URLs.
+    fn ssrf_allowed_hosts(&self) -> Vec<String> {
+        vec![]
+    }
+
     /// Request approval for a tool execution. Blocks until approved/denied/timed out.
     /// Returns `Ok(true)` if approved, `Ok(false)` if denied or timed out.
     async fn request_approval(

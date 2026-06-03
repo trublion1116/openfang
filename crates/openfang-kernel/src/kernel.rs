@@ -7146,6 +7146,10 @@ impl KernelHandle for OpenFangKernel {
             .unwrap_or_else(|| std::time::Duration::from_secs(30))
     }
 
+    fn ssrf_allowed_hosts(&self) -> Vec<String> {
+        self.config.web.fetch.ssrf_allowed_hosts.clone()
+    }
+
     async fn get_channel_default_recipient(&self, channel: &str) -> Option<String> {
         match channel {
             "telegram" => self

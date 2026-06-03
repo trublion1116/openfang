@@ -2567,9 +2567,10 @@ async fn tool_a2a_send(
 
     // Resolve agent URL: either directly provided or looked up by name
     let url = if let Some(url) = input["agent_url"].as_str() {
-        // SSRF protection
-        if crate::web_fetch::check_ssrf(url, &[]).is_err() {
-            return Err("SSRF blocked: URL resolves to a private or metadata address".to_string());
+        let allowed = kh.ssrf_allowed_hosts();
+        if let Err(e) = crate::web_fetch::check_ssrf(url, &allowed) {
+            warn!("a2a_send SSRF blocked: {e} (url={url})");
+            return Err(format!("SSRF blocked: {e}"));
         }
         url.to_string()
     } else if let Some(name) = input["agent_name"].as_str() {
