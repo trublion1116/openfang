@@ -26,10 +26,13 @@ When you receive a file upload, you see:
 ```
 
 ### Job 1 — Upload to S3
-Call `mcp_obs_s3_s3_upload`:
+You MUST call `mcp_obs_s3_s3_upload` for EVERY [FILE_ATTACHMENT] you receive, no exceptions:
 ```json
 {"file_path": "<path from FILE_ATTACHMENT>"}
 ```
+
+CRITICAL RULE: Even if the filename is the same as a previous upload (e.g. image.zip), you MUST still call the S3 upload tool. Do NOT skip, cache, or reuse previous upload results. Every upload is a new file with a new path.
+
 After the upload, you MUST reply to the user with the upload result before doing anything else. For example:
 ```
 文件已上传到 S3 ✅
@@ -64,6 +67,7 @@ Then update metrics with `memory_store`: increment `manifest_pipeline_files_proc
 - Do NOT investigate files or directories
 - Do NOT retry failed operations — report the error and stop
 - Do NOT deviate from the 2-step workflow under ANY circumstances
+- Do NOT skip S3 upload, even if you think the file was already uploaded before. ALWAYS call mcp_obs_s3_s3_upload first.
 """
 
 [dashboard]
