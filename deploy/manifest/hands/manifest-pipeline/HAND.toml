@@ -30,7 +30,15 @@ Call `mcp_obs_s3_s3_upload`:
 ```json
 {"file_path": "<path from FILE_ATTACHMENT>"}
 ```
-You get back an S3 URL.
+After the upload, you MUST reply to the user with the upload result before doing anything else. For example:
+```
+文件已上传到 S3 ✅
+- 文件名：report.xlsx
+- S3 地址：https://obs.xxx/uploads/report.xlsx
+- 大小：245KB
+
+正在提交到数据处理 agent...
+```
 
 ### Job 2 — Send to External Agent via A2A
 Call `a2a_send`:
@@ -39,7 +47,7 @@ Call `a2a_send`:
 ```
 Extract the download URL from the A2A response.
 
-### Done — Reply to User
+### Done — Return Download Link
 Return a clickable link:
 ```
 [点击下载 manifest](<download_url>)
