@@ -2,7 +2,7 @@
 #
 # 使用步骤：
 #   1. 加载镜像：
-#      docker load < openfang-0.6.4-offline-manifest-v3.tar.gz
+#      docker load < openfang-0.6.4-offline-manifest-v10.tar.gz
 #      docker load < mcp-obs-s3-1.2.0.tar.gz
 #
 #   2. 复制 .env.example 为 .env 并填写配置：
@@ -20,7 +20,7 @@
 services:
   # ── OpenFang Agent OS ──────────────────────────────────────────────
   openfang:
-    image: openfang:0.6.4-offline-manifest-v3
+    image: openfang:0.6.4-offline-manifest-v10
     container_name: openfang-manifest
     ports:
       - "4200:4200"
@@ -36,6 +36,8 @@ services:
     environment:
       # LLM API Key（必填）
       - OPENAI_API_KEY=${OPENAI_API_KEY:?请在 .env 中设置 OPENAI_API_KEY}
+      # 上传文件大小限制（单位 MB，默认 100）
+      # - UPLOAD_MAX_SIZE_MB=${UPLOAD_MAX_SIZE_MB:-100}
     depends_on:
       mcp-obs-s3:
         condition: service_started
