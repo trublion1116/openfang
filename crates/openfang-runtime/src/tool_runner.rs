@@ -371,7 +371,7 @@ pub async fn execute_tool(
         "hand_deactivate" => tool_hand_deactivate(input, kernel).await,
 
         // A2A outbound tools (cross-instance agent communication)
-        "a2a_discover" => tool_a2a_discover(input).await,
+        "a2a_discover" => tool_a2a_discover(input, kernel).await,
         "a2a_send" => tool_a2a_send(input, kernel).await,
 
         // Browser automation tools
@@ -2541,12 +2541,19 @@ async fn tool_hand_deactivate(
 // ---------------------------------------------------------------------------
 
 /// Discover an external A2A agent by fetching its agent card.
-async fn tool_a2a_discover(input: &serde_json::Value) -> Result<String, String> {
+async fn tool_a2a_discover(
+    input: &serde_json::Value,
+    kernel: Option<&Arc<dyn KernelHandle>>,
+) -> Result<String, String> {
     let url = input["url"].as_str().ok_or("Missing 'url' parameter")?;
 
-    // SSRF protection: block private/metadata IPs
-    if crate::web_fetch::check_ssrf(url, &[]).is_err() {
-        return Err("SSRF blocked: URL resolves to a private or metadata address".to_string());
+    // SSRF protection: use configured allowlist
+    let allowed = kernel
+        .map(|kh| kh.ssrf_allowed_hosts())
+        .unwrap_or_default();
+    if let Err(e) = crate::web_fetch::check_ssrf(url, &allowed) {
+        warn!("a2a_discover SSRF blocked: {e} (url={url})");
+        return Err(format!("SSRF blocked: {e}"));
     }
 
     let client = crate::a2a::A2aClient::new(std::time::Duration::from_secs(30));
@@ -2566,16 +2573,21 @@ async fn tool_a2a_send(
         .ok_or("Missing 'message' parameter")?;
 
     // Resolve agent URL: either directly provided or looked up by name
+    let allowed = kh.ssrf_allowed_hosts();
     let url = if let Some(url) = input["agent_url"].as_str() {
-        let allowed = kh.ssrf_allowed_hosts();
         if let Err(e) = crate::web_fetch::check_ssrf(url, &allowed) {
             warn!("a2a_send SSRF blocked: {e} (url={url})");
             return Err(format!("SSRF blocked: {e}"));
         }
         url.to_string()
     } else if let Some(name) = input["agent_name"].as_str() {
-        kh.get_a2a_agent_url(name)
-            .ok_or_else(|| format!("No known A2A agent with name '{name}'. Use a2a_discover first or provide agent_url directly."))?
+        let resolved_url = kh.get_a2a_agent_url(name)
+            .ok_or_else(|| format!("No known A2A agent with name '{name}'. Use a2a_discover first or provide agent_url directly."))?;
+        if let Err(e) = crate::web_fetch::check_ssrf(&resolved_url, &allowed) {
+            warn!("a2a_send SSRF blocked: {e} (name={name}, url={resolved_url})");
+            return Err(format!("SSRF blocked: {e}"));
+        }
+        resolved_url
     } else {
         return Err("Missing 'agent_url' or 'agent_name' parameter".to_string());
     };
