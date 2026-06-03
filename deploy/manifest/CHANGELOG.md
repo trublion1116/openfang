@@ -4,7 +4,19 @@
 
 ---
 
-## v11 — 待构建
+## v12
+
+**镜像**: `openfang:0.6.4-offline-manifest-v12`
+**日期**: 2026-06-03
+
+- **fix**: 所有 A2A 工具（`a2a_send`、`a2a_discover`）统一读取 config.toml 的 `ssrf_allowed_hosts`，`agent_name` 路径也加入 SSRF 检查
+- **fix**: 强制每次文件上传都调用 S3，即使文件名相同也不跳过
+- **fix**: S3 上传成功后先向用户展示上传结果，再继续 A2A 调用
+- **fix**: manifest-pipeline hand 严格限制为 2 步流程，移除 `file_list`/`file_read`/`file_write` 工具权限
+
+---
+
+## v11
 
 **镜像**: `openfang:0.6.4-offline-manifest-v11`
 **日期**: 2026-06-03
