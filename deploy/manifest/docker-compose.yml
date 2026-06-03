@@ -16,6 +16,8 @@
 #      在 Hands 页面激活 Manifest Hand
 #
 #   5. 上传文件测试：在 chat 界面上传 xlsx/docx/zip 等文件
+#
+# 注意：上传文件大小限制在 config.toml 中配置 upload_max_size_mb（默认 10 MB）
 
 services:
   # ── OpenFang Agent OS ──────────────────────────────────────────────
@@ -36,8 +38,6 @@ services:
     environment:
       # LLM API Key（必填）
       - OPENAI_API_KEY=${OPENAI_API_KEY:?请在 .env 中设置 OPENAI_API_KEY}
-      # 上传文件大小限制（单位 MB，默认 100）
-      # - UPLOAD_MAX_SIZE_MB=${UPLOAD_MAX_SIZE_MB:-100}
     depends_on:
       mcp-obs-s3:
         condition: service_started
