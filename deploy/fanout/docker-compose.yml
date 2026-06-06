@@ -1,0 +1,64 @@
+# OpenFang FanOut 投票集群部署
+#
+# 使用步骤：
+#   1. 加载镜像（同 manifest 部署）
+#      docker load < openfang-0.6.4-offline-manifest-v10.tar.gz
+#      docker load < mcp-obs-s3-1.2.0.tar.gz
+#
+#   2. 前提：OpenFang 镜像需包含 FanOut 错误容忍补丁
+#      （修改 workflow.rs 后重新构建镜像）
+#
+#   3. 配置
+#      cp .env.example .env && vim .env
+#
+#   4. 启动
+#      docker compose up -d
+#
+#   5. 初始化 Agent + Workflow
+#      ./scripts/init.sh
+#
+#   6. 执行
+#      ./scripts/run.sh 'path=/tmp/test filename=test.xlsx'
+
+services:
+  # ── OpenFang Agent OS（需包含 FanOut 补丁）──────────────────────
+  openfang:
+    image: openfang:0.6.4-offline-fanout-v1
+    container_name: openfang-fanout
+    ports:
+      - "4200:4200"
+    volumes:
+      - openfang-data:/data
+      - ./config.toml:/etc/openfang/config.toml:ro
+    environment:
+      - OPENAI_API_KEY=${GLM_API_KEY:?请在 .env 中设置 GLM_API_KEY}
+    depends_on:
+      mcp-obs-s3:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:4200/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ── MCP OBS S3 Server（同 manifest 部署）───────────────────────
+  mcp-obs-s3:
+    image: mcp-obs-s3:1.2.0
+    container_name: mcp-obs-s3
+    volumes:
+      - openfang-data:/data:ro
+    environment:
+      - MCP_TRANSPORT=http
+      - MCP_PORT=3100
+      - OBS_ACCESS_KEY_ID=${OBS_ACCESS_KEY_ID:?请在 .env 中设置 OBS_ACCESS_KEY_ID}
+      - OBS_SECRET_ACCESS_KEY=${OBS_SECRET_ACCESS_KEY:?请在 .env 中设置 OBS_SECRET_ACCESS_KEY}
+      - OBS_ENDPOINT=${OBS_ENDPOINT:?请在 .env 中设置 OBS_ENDPOINT}
+      - OBS_BUCKET=${OBS_BUCKET:?请在 .env 中设置 OBS_BUCKET}
+      - OBS_UPLOAD_PREFIX=${OBS_UPLOAD_PREFIX:-uploads/}
+      - OBS_URL_EXPIRES=${OBS_URL_EXPIRES:-3600}
+    restart: unless-stopped
+
+volumes:
+  openfang-data:

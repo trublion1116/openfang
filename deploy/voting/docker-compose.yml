@@ -1,0 +1,85 @@
+# OpenFang 投票集群部署
+#
+# 使用步骤：
+#   1. 配置环境变量：cp .env.example .env && vim .env
+#   2. 启动：docker compose up -d --build
+#   3. 验证：./scripts/verify.sh
+#   4. 访问 Dashboard：http://localhost:4200
+#      在 Hands 页面激活 Manifest Pipeline Hand
+#   5. 测试：在 chat 界面上传文件，观察投票结果
+
+services:
+  # ── OpenFang Agent OS ──────────────────────────────────────────
+  openfang:
+    image: openfang:0.6.4-offline-manifest-v12
+    container_name: openfang-voting
+    ports:
+      - "4200:4200"
+    volumes:
+      - openfang-data:/data
+      - ./hands:/opt/openfang/hands:ro
+      - ./config.toml:/etc/openfang/config.toml:ro
+    env_file: .env
+    depends_on:
+      mcp-obs-s3:
+        condition: service_started
+      voting-gateway:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:4200/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ── MCP OBS S3 Server ──────────────────────────────────────────
+  mcp-obs-s3:
+    image: mcp-obs-s3:1.2.0
+    container_name: mcp-obs-s3-voting
+    volumes:
+      - openfang-data:/data:ro
+    env_file: .env
+    environment:
+      - MCP_TRANSPORT=http
+      - MCP_PORT=3100
+      - OBS_UPLOAD_PREFIX=${OBS_UPLOAD_PREFIX:-uploads/}
+      - OBS_URL_EXPIRES=${OBS_URL_EXPIRES:-3600}
+    restart: unless-stopped
+
+  # ── 投票网关 ──────────────────────────────────────────────────
+  voting-gateway:
+    build: ./voting-gateway
+    container_name: voting-gateway
+    ports:
+      - "9200:9200"
+    environment:
+      - WORKER_URL=${WORKER_URL:-http://mock-worker:9100/a2a}
+      - N_REPLICAS=${N_REPLICAS:-10}
+      - VOTE_STRATEGY=${VOTE_STRATEGY:-exact_match}
+      - WORKER_TIMEOUT=${WORKER_TIMEOUT:-120}
+      - MIN_SUCCESS=${MIN_SUCCESS:-3}
+      - LLM_API_URL=${LLM_API_URL:-}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_MODEL=${LLM_MODEL:-glm-5.1}
+      - GATEWAY_PORT=9200
+      - LOG_LEVEL=info
+    depends_on:
+      mock-worker:
+        condition: service_started
+    restart: unless-stopped
+
+  # ── Mock Worker（测试用，生产环境替换为真实外部Agent）────────
+  mock-worker:
+    build: ./mock-worker
+    container_name: mock-worker
+    environment:
+      - MOCK_CORRECT_RATE=${MOCK_CORRECT_RATE:-0.7}
+      - MOCK_TIMEOUT_RATE=${MOCK_TIMEOUT_RATE:-0.05}
+      - MOCK_DELAY_MS=${MOCK_DELAY_MS:-500}
+      - MOCK_DELAY_JITTER=${MOCK_DELAY_JITTER:-300}
+      - WORKER_PORT=9100
+    restart: unless-stopped
+
+volumes:
+  openfang-data:

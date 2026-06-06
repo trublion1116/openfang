@@ -1,0 +1,113 @@
+{
+  "name": "fanout-voting-pipeline",
+  "description": "FanOut 投票管道：上传 S3 → 10 Agent 并行处理 → Collect → 投票表决",
+  "steps": [
+    {
+      "name": "upload-to-s3",
+      "agent_name": "uploader",
+      "prompt": "{{input}}",
+      "mode": "sequential",
+      "timeout_secs": 60,
+      "error_mode": "fail",
+      "output_var": "s3_url"
+    },
+    {
+      "name": "process-1",
+      "agent_name": "processor-1",
+      "prompt": "处理这个文件: {{s3_url}}",
+      "mode": "fan_out",
+      "timeout_secs": 180,
+      "error_mode": "skip"
+    },
+    {
+      "name": "process-2",
+      "agent_name": "processor-2",
+      "prompt": "处理这个文件: {{s3_url}}",
+      "mode": "fan_out",
+      "timeout_secs": 180,
+      "error_mode": "skip"
+    },
+    {
+      "name": "process-3",
+      "agent_name": "processor-3",
+      "prompt": "处理这个文件: {{s3_url}}",
+      "mode": "fan_out",
+      "timeout_secs": 180,
+      "error_mode": "skip"
+    },
+    {
+      "name": "process-4",
+      "agent_name": "processor-4",
+      "prompt": "处理这个文件: {{s3_url}}",
+      "mode": "fan_out",
+      "timeout_secs": 180,
+      "error_mode": "skip"
+    },
+    {
+      "name": "process-5",
+      "agent_name": "processor-5",
+      "prompt": "处理这个文件: {{s3_url}}",
+      "mode": "fan_out",
+      "timeout_secs": 180,
+      "error_mode": "skip"
+    },
+    {
+      "name": "process-6",
+      "agent_name": "processor-6",
+      "prompt": "处理这个文件: {{s3_url}}",
+      "mode": "fan_out",
+      "timeout_secs": 180,
+      "error_mode": "skip"
+    },
+    {
+      "name": "process-7",
+      "agent_name": "processor-7",
+      "prompt": "处理这个文件: {{s3_url}}",
+      "mode": "fan_out",
+      "timeout_secs": 180,
+      "error_mode": "skip"
+    },
+    {
+      "name": "process-8",
+      "agent_name": "processor-8",
+      "prompt": "处理这个文件: {{s3_url}}",
+      "mode": "fan_out",
+      "timeout_secs": 180,
+      "error_mode": "skip"
+    },
+    {
+      "name": "process-9",
+      "agent_name": "processor-9",
+      "prompt": "处理这个文件: {{s3_url}}",
+      "mode": "fan_out",
+      "timeout_secs": 180,
+      "error_mode": "skip"
+    },
+    {
+      "name": "process-10",
+      "agent_name": "processor-10",
+      "prompt": "处理这个文件: {{s3_url}}",
+      "mode": "fan_out",
+      "timeout_secs": 180,
+      "error_mode": "skip"
+    },
+    {
+      "name": "collect-results",
+      "agent_name": "uploader",
+      "prompt": "ignore",
+      "mode": "collect",
+      "timeout_secs": 5,
+      "error_mode": "fail",
+      "output_var": "all_results"
+    },
+    {
+      "name": "vote",
+      "agent_name": "voter",
+      "prompt": "以下是10个Agent的处理结果，请投票表决：\n\n{{input}}",
+      "mode": "sequential",
+      "timeout_secs": 60,
+      "error_mode": "fail",
+      "output_var": "final_result"
+    }
+  ]
+}
